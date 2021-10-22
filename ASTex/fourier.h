@@ -347,6 +347,12 @@ double ASTEX_API dot_product_spectrum_linear_weights(const ImageSpectrald& sp1, 
  */
 double ASTEX_API dot_product_spectrum_uniform_weights(const ImageSpectrald& sp1, const ImageSpectrald& sp2);
 
+double ASTEX_API stationaryMean(const ImageGrayd& input);
+
+double ASTEX_API stationaryVariance(const ImageGrayd& input);
+
+bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool correlation=false);
+
 /**
  * \class spectrum_projector_2D fourier.h
  * \brief projects a spectrum onto a subspace of dimension 2

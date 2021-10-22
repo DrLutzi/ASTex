@@ -1229,5 +1229,74 @@ void spectrum_projector_3D::reproject (std::vector<double>& coord, const unsigne
 	coord[z] = 0;
 }
 
+////////////////////////////////////////////////////
+///Additions by N. Lutz
+double stationaryMean(const ImageGrayd& input)
+{
+	const int im_w = input.width();
+	const int im_h = input.height();
+	double m = 0.0;
+
+	input.for_all_pixels([&] (int x, int y)
+	{
+		m += input.pixelAbsolute(x,y);
+	});
+	m /= im_w*im_h;
+	return m;
+}
+
+
+double stationaryVariance(const ImageGrayd& input)
+{
+	const int im_w = input.width();
+	const int im_h = input.height();
+
+	double m = stationaryMean(input);
+	double v = 0;
+	input.for_all_pixels([&] (int x, int y)
+	{
+		v += (input.pixelAbsolute(x,y) - m)*(input.pixelAbsolute(x,y) - m);
+	});
+	v/= im_w*im_h;
+	return v;
+}
+
+bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool computeCorrelation)
+{
+	const int im_w = input.width();
+	const int im_h = input.height();
+
+	autocorrelation.initItk(input.width(), input.height());
+
+	double m = stationaryMean(input);
+	double v = stationaryVariance(input);
+	bool autoCorrelationExists = v>0.0005;
+
+	if(autoCorrelationExists || !computeCorrelation)
+	{
+		// compute auto-correlation
+		autocorrelation.for_all_pixels([&] (double& P, int dx, int dy)
+		{
+			if(dx != 0 || dy != 0)
+			{
+				double cov = 0;
+
+				input.for_all_pixels([&] (int x, int y)
+				{
+					cov += (input.pixelAbsolute(x,y) - m) * (input.pixelAbsolute((x+dx)%im_w,(y+dy)%im_h) - m);
+				});
+
+				P = cov / (im_w*im_h);
+			}
+			else
+				P = v;
+			if(computeCorrelation)
+				P/=v;
+		});
+	}
+
+	return autoCorrelationExists;
+}
+
 } // end namespace Fourier
 } // end namespace ASTex

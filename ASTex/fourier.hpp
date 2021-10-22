@@ -1,3 +1,5 @@
+#ifndef __FOURIER_HPP__
+#define __FOURIER_HPP__
 
 // IMAGE
 #include <itkShiftScaleImageFilter.h>
@@ -830,7 +832,7 @@ double getPower (const ImageGrayd& input, const MASK& mask)
 	return power;
 }
 
-
-
 } // end namespace Fourier
 } // end namespace ASTex
+
+#endif

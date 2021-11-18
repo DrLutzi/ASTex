@@ -10,6 +10,9 @@
 #include <Eigen/Core>
 #include <random>
 #include <ctime>
+#include "ASTex/image_gray.h"
+#include "ASTex/utils.h"
+
 namespace ASTex
 {
 
@@ -365,6 +368,148 @@ public:
 private:
 	unsigned int		m_nbPoints;
 	Eigen::Vector2f		m_cycles[2];
+};
+
+template <typename Predicate> int FindInterval(int size,
+		const Predicate &pred) {
+	int first = 0, len = size;
+	while (len > 0) {
+		int half = len >> 1, middle = first + half;
+		   if (pred(middle)) {
+			   first = middle + 1;
+			   len -= half + 1;
+		   } else
+			   len = half;
+
+	}
+	return ASTex::clamp_scalar<float, float>(first - 1, 0, size - 2);
+}
+
+/**
+ * @brief The SamplerCycles class is an override of SamplerBase,
+ * supposed to yield an array of points in respect to a uniform random process.
+ */
+class SamplerImportance : public SamplerBase
+{
+public:
+	/**
+	 * @brief SamplerCycles constructor for SamplerUniform.
+	 * @param nbPoints is the default number of points the generate() function yields.
+	 */
+	SamplerImportance(ImageGrayd importanceFunction, unsigned nbPoints=0);
+
+	~SamplerImportance()
+	{
+		delete m_functionFloatPointer;
+	}
+
+	struct Distribution1D {
+		   Distribution1D(const float *f, int n)
+			   : func(f, f + n), cdf(n + 1) {
+				  cdf[0] = 0;
+				  for (int i = 1; i < n + 1; ++i)
+					  cdf[i] = cdf[i - 1] + func[i - 1] / n;
+
+				  funcInt = cdf[n];
+				  if (funcInt == 0) {
+					  for (int i = 1; i < n + 1; ++i)
+						  cdf[i] = float(i) / float(n);
+				  } else {
+					  for (int i = 1; i < n + 1; ++i)
+						  cdf[i] /= funcInt;
+				  }
+
+		   }
+		   int Count() const { return func.size(); }
+		   float SampleContinuous(float u, float *pdf, int *off = nullptr) const {
+				  int offset = FindInterval(cdf.size(),
+					  [&](int index) { return cdf[index] <= u; });
+
+			   if (off) *off = offset;
+				  float du = u - cdf[offset];
+				  if ((cdf[offset + 1] - cdf[offset]) > 0)
+					  du /= (cdf[offset + 1] - cdf[offset]);
+				  if (pdf) *pdf = func[offset] / funcInt;
+				  return (offset + du) / Count();
+
+		   }
+		   int SampleDiscrete(float u, float *pdf = nullptr,
+				   float *uRemapped = nullptr) const {
+				  int offset = FindInterval(cdf.size(),
+					  [&](int index) { return cdf[index] <= u; });
+
+			   if (pdf) *pdf = func[offset] / (funcInt * Count());
+			   if (uRemapped)
+				   *uRemapped = (u - cdf[offset]) / (cdf[offset + 1] - cdf[offset]);
+			   return offset;
+		   }
+		   float DiscretePDF(int index) const {
+			   return func[index] / (funcInt * Count());
+		   }
+
+		   std::vector<float> func, cdf;
+		   float funcInt;
+
+	};
+
+	class Distribution2D {
+	public:
+
+		Distribution2D() {}
+
+		void init(const float *func, int nu, int nv)
+		{
+			for (int v = 0; v < nv; ++v)
+			{
+				pConditionalV.emplace_back(new Distribution1D(&func[v * nu], nu));
+			}
+			std::vector<float> marginalFunc;
+			for (int v = 0; v < nv; ++v)
+				marginalFunc.push_back(pConditionalV[v]->funcInt);
+			pMarginal.reset(new Distribution1D(&marginalFunc[0], nv));
+		}
+
+
+		Eigen::Vector2f SampleContinuous(const Eigen::Vector2f &u, float *pdf) const
+		{
+			float pdfs[2];
+			int v;
+			float d1 = pMarginal->SampleContinuous(u[1], &pdfs[1], &v);
+			float d0 = pConditionalV[v]->SampleContinuous(u[0], &pdfs[0]);
+			*pdf = pdfs[0] * pdfs[1];
+			return Eigen::Vector2f(d0, d1);
+		}
+
+		float Pdf(const Eigen::Vector2f &p) const {
+			int iu = ASTex::clamp_scalar(int(p[0] * pConditionalV[0]->Count()),
+						   0, pConditionalV[0]->Count() - 1);
+			int iv = ASTex::clamp_scalar(int(p[1] * pMarginal->Count()),
+						   0, pMarginal->Count() - 1);
+			return pConditionalV[iv]->func[iu] / pMarginal->funcInt;
+		}
+
+	private:
+		std::vector<std::unique_ptr<Distribution1D>> pConditionalV;
+		std::unique_ptr<Distribution1D> pMarginal;
+	};
+
+	/**
+	 * @param nbPoints is the total number of points the generate() function will produce.
+	 */
+	void setNbPoints(unsigned nbPoints) {m_nbPoints = nbPoints;}
+
+	/**
+	 * @brief generate yields an array of floating point coordinates
+	 * randomly distributed according to 2 uniform laws between 0 and 1.
+	 * @return the coordinates array.
+	 */
+	std::vector<Eigen::Vector2f> generate();
+
+private:
+	ImageGrayd			m_importanceFunction;
+	unsigned int		m_nbPoints;
+	Distribution2D		m_distribution2D;
+	float *				m_functionFloatPointer;
 };
 
 } //namespace Stamping

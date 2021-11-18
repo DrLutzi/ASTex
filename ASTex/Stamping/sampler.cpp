@@ -124,6 +124,34 @@ std::vector<Eigen::Vector2f> SamplerCycles::generate()
 	return SamplePoints;
 }
 
+SamplerImportance::SamplerImportance(ImageGrayd importanceFunction, unsigned nbPoints) :
+	SamplerBase(),
+	m_importanceFunction(importanceFunction),
+	m_nbPoints(nbPoints),
+	m_distribution2D()
+{
+	m_functionFloatPointer = new float[importanceFunction.width() * importanceFunction.height()];
+	m_importanceFunction.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
+	{
+		m_functionFloatPointer[y*m_importanceFunction.width() + x] = float(pix);
+	});
+	m_distribution2D.init(m_functionFloatPointer, m_importanceFunction.width(), m_importanceFunction.height());
+}
+
+std::vector<Eigen::Vector2f> SamplerImportance::generate()
+{
+	std::vector<Eigen::Vector2f> SamplePoints;
+	SamplePoints.resize(m_nbPoints);
+	float pdf;
+	for(unsigned i=0; i < m_nbPoints; ++i)
+	{
+		Eigen::Vector2f base(static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
+							 static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+		SamplePoints[i]=m_distribution2D.SampleContinuous(base, &pdf);
+	}
+	return SamplePoints;
+}
+
 } //namsepace Stamping
 
 } //namespace ASTex

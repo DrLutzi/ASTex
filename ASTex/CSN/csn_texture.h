@@ -9,7 +9,7 @@
 #include "ASTex/colorspace_filters.h"
 #include "ASTex/easy_io.h"
 #include "ASTex/histogram.h"
-#include "ASTex/rpn_utils.h" //delete this idiot
+#include "ASTex/Stamping/sampler.h"
 
 //#define CSN_ENABLE_DEBUG
 #ifdef CSN_ENABLE_DEBUG
@@ -57,6 +57,9 @@ public:
 	void setUVScale(double uvScale);
 	void setCyclicTransferPolicy(unsigned radius=0, unsigned samples=1);
 
+	void setUseSampler(bool b);
+	void setSampler(Stamping::SamplerImportance *sampler);
+
 	ImageRGBd debug_cycleEvaluationMap(int width, int height, Eigen::Vector2d center, double radius) const;
 	void estimateCycles(const Eigen::Vector2d &guidX, const Eigen::Vector2d &guidY, double searchRadius, bool periodicity, unsigned stochasticGradientSearchEnergy=16);
 
@@ -74,6 +77,7 @@ private:
 						Eigen::Vector2i &vertex1, Eigen::Vector2i &vertex2, Eigen::Vector2i &vertex3) const;
 	Eigen::Vector2d hash(const Eigen::Vector2d &p) const;
 	Eigen::Vector2d cyclicHash(const Eigen::Vector2d &p) const;
+	Eigen::Vector2d importanceHash(const Eigen::Vector2d &p) const;
 	Eigen::Vector2d floor(const Eigen::Vector2d &v) const;
 	Eigen::Vector2d fract(const Eigen::Vector2d &v) const;
 
@@ -96,6 +100,8 @@ private:
 	double					m_cyclicTransferRadius;
 	unsigned				m_cyclicTransferSamples;
 
+	bool							m_useImportanceSampling;
+	Stamping::SamplerImportance		*m_sampler;
 };
 
 template<typename I>
@@ -189,19 +195,31 @@ void CSN_Texture<I>::setCyclicTransferPolicy(unsigned radius, unsigned samples)
 	m_cyclicTransferSamples = samples;
 }
 
+template<typename I>
+void CSN_Texture<I>::setUseSampler(bool b)
+{
+	m_useImportanceSampling = b;
+}
 
-
-
-
+template<typename I>
+void CSN_Texture<I>::setSampler(Stamping::SamplerImportance *sampler)
+{
+	m_sampler = sampler;
+	if(sampler != nullptr)
+		m_useImportanceSampling = true;
+}
 
 template<typename I>
 typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, unsigned height)
 {
 	assert(m_exemplar.is_initialized());
+
+	//Treat the width argument if it is equal to 0
+
 	if(width==0)
-		width=m_exemplar.width()*1;
+		width=m_exemplar.width();
 	if(height==0)
-		height=m_exemplar.height()*1;
+		height=m_exemplar.height();
 	unsigned pixelSize = sizeof(PixelType)/sizeof(DataType);
 	assert(pixelSize <= 3 && "CSN_Texture::synthesize: Cannot use PCA with images of dimensions higher than 3!");
 
@@ -222,11 +240,17 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 
 	ImageType output;
 	output.initItk(width, height, true);
+
+	//Initialize the lookup table
 	LutType lut;
 	lut.initItk(128, 1);
+
+	//Used to bypass ASTex limitations when dealing with template pixel types
 	DataType *dataPix;
 	const DataType *dataPixConst;
 
+	//This lambda turns an ImageType into a PCA Image Type.
+	//This is because the PCA class unfortunately only accepts double types.
 	auto toPcaImageType = [&] (const ImageType &texture) -> PcaImageType
 	{
 		PcaImageType pcaTexture;
@@ -254,6 +278,7 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 		return pcaTexture;
 	};
 
+	//This lambda does the opposite.
 	auto fromPcaImageType = [&] (const PcaImageType &pcaTexture) -> ImageType
 	{
 		ImageType texture;
@@ -268,7 +293,10 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 		return texture;
 	};
 
+	//Treat the input with the previously mentioned lambda
 	PcaImageType pcaTexture = toPcaImageType(m_exemplar);
+
+	//Change color space if the user wants to (side note: this didn't do anything helpful in our tests)
 	if(m_useYCbCr)
 	{
 		pcaTexture.for_all_pixels([] (typename PcaImageType::PixelType &pix)
@@ -283,12 +311,15 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 	GaussianTransferType gtt;
 
 	//////////////////////////////INPUT////////////////////////////////////
+	//This part deals with treating the input (Gaussianising it, applying a PCA, etc).
 
 	PcaType pca(pcaTexture);
 	if(m_usePca)
 	{
 		if(m_useCycles && m_useCyclicPCA)
 		{
+			//If using the cycles feature, there is one PCA per polyphase component.
+			//This treatment is not optimal but it yields our cool results nontheless.
 			int pcaWidth, pcaHeight, GWidth, GHeight;
 			pcaWidth = int(std::floor(1.0/m_cycles[0][0]));
 			pcaHeight = int(std::floor(1.0/m_cycles[1][1]));
@@ -346,8 +377,10 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 	pcaGaussianTexture.initItk(pcaTexture.width(), pcaTexture.height());
 	if(m_useGaussianTransfer)
 	{
+		//Gaussian transfer (from the input's histogram to Gaussian order 1 statistics)
 		if(m_useCycles && m_useCyclicTransfer)
 		{
+			//Same as PCA; if using cycles, there is one Gaussianization (and one histogram) for each polyphase component.
 			int transferWidth, transferHeight, GWidth, GHeight;
 			transferWidth = int(std::floor(1.0/m_cycles[0][0]));
 			transferHeight = int(std::floor(1.0/m_cycles[1][1]));
@@ -404,9 +437,13 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 	}
 
 	//////////////////////////////OUTPUT///////////////////////////////////
+	//This part deals with generating the output.
 
 	PcaImageType pcaOutput;
 	pcaOutput.initItk(output.width(), output.height());
+	//The following part applies the ACTUAL synthesis algorithm.
+	//Either there is a procedural noise function specified, either it will default
+	//to the T&B (tiling and blending) algorithm of Heitz & Neyret (previously called high performance noise).
 	if(m_func_proceduralBlendingSubstitute == nullptr)
 	{
 		pcaOutput.for_all_pixels([&] (PcaPixelType &pix, int x, int y)
@@ -421,8 +458,12 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 	{
 		pcaOutput = m_func_proceduralBlendingSubstitute(pcaGaussianTexture);
 	}
+
+	//This part does the opposite treatment done on the input
+	//but it does it with the output.
 	if(m_useGaussianTransfer)
 	{
+		//inverse Gaussian transfer (from Gaussian order 1 statistics to the input's histogram)
 		if(m_useCycles && m_useCyclicTransfer)
 		{
 			unsigned transferWidth, transferHeight, GWidth, GHeight;
@@ -1320,6 +1361,8 @@ typename CSN_Texture<I>::PcaPixelType CSN_Texture<I>::proceduralTilingAndBlendin
 
 	auto lmbd_hashFunction = [&](const Eigen::Vector2i &vec) -> Eigen::Vector2d
 	{
+		if(m_useImportanceSampling)
+			return importanceHash(vec.cast<double>());
 		if(m_useCycles)
 			return cyclicHash(vec.cast<double>());
 		else
@@ -1393,6 +1436,7 @@ void CSN_Texture<I>::TriangleGrid (	Eigen::Vector2d uv, float &w1, float &w2, fl
 	w3 = w3/sumW;
 }
 
+//the following 2 functions use the same hash as their GPU implementation
 template<typename I>
 Eigen::Vector2d CSN_Texture<I>::hash(const Eigen::Vector2d &p) const
 {
@@ -1417,6 +1461,15 @@ Eigen::Vector2d CSN_Texture<I>::cyclicHash(const Eigen::Vector2d &p) const
 	int cycle1 = int(h[0]*randMax);
 	int cycle2 = int(h[1]*randMax);
 	return double(cycle1)*m_cycles[0] + double(cycle2)*m_cycles[1];
+}
+
+template<typename I>
+Eigen::Vector2d CSN_Texture<I>::importanceHash(const Eigen::Vector2d &p) const
+{
+	assert(m_sampler && "importanceHash: no sampler is set.");
+	srand(int(p[1]*(1<<14)*m_exemplar.width()) + int(p[0]*(1<<14)));
+	Eigen::Vector2f pf = m_sampler->next();
+	return Eigen::Vector2d(double(pf[0]), double(pf[1]));
 }
 
 template<typename I>

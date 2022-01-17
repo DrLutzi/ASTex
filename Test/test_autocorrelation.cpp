@@ -7,6 +7,7 @@
 #include "Eigen/Eigen"
 #include "ASTex/CSN/csn_texture.h"
 #include "ASTex/Stamping/stamper.h"
+#include "ASTex/rpn_utils.h"
 
 using ImageType = ImageRGBd;
 using PcaImageType = CSN::CSN_Texture<ImageType>::PcaImageType;
@@ -87,7 +88,7 @@ PcaImageType spotNoiseProcedure(const PcaImageType &image)
 	Stamping::StampDiscrete<PcaImageType> stamp(centeredImage);
 	stamp.setInterpolationRule(Stamping::StampDiscrete<PcaImageType>::BILINEAR_PERIODIC);
 	Stamping::SamplerImportance sampler(acorr);
-	sampler.setNbPoints(100);
+	sampler.setNbPoints(30);
 	Stamping::StamperTexton<PcaImageType> stamper(&sampler, &stamp);
 	stamper.setPeriodicity(true);
 	stamper.setSpot(false);
@@ -147,6 +148,7 @@ int main(int argc, char **argv)
 	bool exists;
 	exists = Fourier::truePeriodicStationaryAutocovariance(img_r, acorr, true);
 
+	ImageGrayu8 pdf;
 	if(exists)
 	{
 		acorr.for_all_pixels([&] (ImageGrayd::PixelType &pix)
@@ -155,25 +157,11 @@ int main(int argc, char **argv)
 		});
 		IO::save01_in_u8(acorr, std::string("/home/nlutz/") + name_noext + "_acorr.png");
 
-//		std::vector<FullTexel> texelVector;
-//		texelVector.reserve(acorr.width()*acorr.height());
-//		acorr.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
-//		{
-//			FullTexel tex;
-//			tex.first = itk::Index<2>();
-//			tex.first[0] = x;
-//			tex.first[1] = y;
-//			tex.second = pix;
-//		});
-//		CompareTexelValue compare;
-//		std::sort(texelVector.begin(), texelVector.end(), compare);
-		//std::rand()%texelVector.size()/6;
+		pdf.initItk(acorr.width(), acorr.height(), true);
+		Stamping::SamplerImportance sampler(acorr);
+		csn.setSampler(&sampler);
+		csn.setUseSampler(false);
 	}
-
-//	//The following is how I produced the figure showing the distance map
-//	ImageRGBd cycleEvaluationMap = csn.debug_cycleEvaluationMap(129, 129, Eigen::Vector2d(cyclePair.vectors[0][0], cyclePair.vectors[1][1]), 0.1);
-//	IO::save01_in_u8(cycleEvaluationMap, std::string("/home/nlutz/cycleEvaluationMap129_") + textureName + ".png");
-
 	csn.setCycles(Eigen::Vector2d(), Eigen::Vector2d());
 	csn.setUseCycles(false);
 	csn.setGamma(1.0);
@@ -182,29 +170,41 @@ int main(int argc, char **argv)
 	csn.setUseYCbCr(false);
 	csn.setUseCyclicTransfer(false);
 	csn.setUVScale(1.0);
-	csn.setProceduralBlendingSubstitute(spotNoiseProcedure);
-	ImageType output = csn.synthesize(img.width(), img.height());
+	//csn.setProceduralBlendingSubstitute(spotNoiseProcedure);
+	ImageType output = csn.synthesize(0, 0);
+	output.for_all_pixels([&] (ImageType::PixelType &pix)
+	{
+		for(int i=0; i<3; ++i)
+		{
+			pix[i] = pix[i] > 1.0 ? 1.0 : (pix[i] < 0.0 ? 0.0 : pix[i]);
+		}
+	});
 	IO::save01_in_u8(output, std::string("/home/nlutz/" + name_noext + "_output.png"));
-//	output.for_all_pixels([&] (ImageType::PixelType &pix)
-//	{
-//		for(int i=0; i<3; ++i)
-//		{
-//			pix[i] = pix[i] > 1.0 ? 1.0 : (pix[i] < 0.0 ? 0.0 : pix[i]);
-//		}
-//	});
 
 	std::cout << Fourier::stationaryMean(img_r) << std::endl;
 	std::cout << Fourier::stationaryVariance(img_r) << std::endl;
 
-	ImageGrayu8 pdf;
-	pdf.initItk(acorr.width(), acorr.height(), true);
+	ImageGrayd acorr_output;
+	acorr_output.initItk(output.width(), output.height());
+	extract3Channels(output, img_r, img_g, img_b);
+	exists = Fourier::truePeriodicStationaryAutocovariance(img_r, acorr_output, true);
+	if(exists)
+	{
+		acorr_output.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+		{
+			pix = pix < 0 ? 0 : pix;
+		});
+		IO::save01_in_u8(acorr_output, std::string("/home/nlutz/") + name_noext + "_acorr_output.png");
+	}
+
+	//Testing the sampler
 	Stamping::SamplerImportance sampler(acorr);
 	sampler.setNbPoints(10000);
 	std::vector<Eigen::Vector2f> points = sampler.generate();
 	for(std::vector<Eigen::Vector2f>::const_iterator cit = points.begin(); cit!=points.end(); ++cit)
 	{
 		ImageGrayu8::PixelType &p = pdf.pixelAbsolute(int((*cit)[0]*(pdf.width()-1)), int((*cit)[1]*(pdf.height()-1)));
-		p = p == 255? 255 : p+15;
+		p = p == 250? 250 : p+50;
 	}
 	pdf.save(std::string("/home/nlutz/") + name_noext + "_pdf.png");
 

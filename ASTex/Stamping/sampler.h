@@ -505,6 +505,8 @@ public:
 	 */
 	std::vector<Eigen::Vector2f> generate();
 
+	Eigen::Vector2f	next();
+
 private:
 	ImageGrayd			m_importanceFunction;
 	unsigned int		m_nbPoints;

@@ -152,6 +152,14 @@ std::vector<Eigen::Vector2f> SamplerImportance::generate()
 	return SamplePoints;
 }
 
+Eigen::Vector2f	SamplerImportance::next()
+{
+	float pdf;
+	Eigen::Vector2f base(static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
+						 static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+	return m_distribution2D.SampleContinuous(base, &pdf);
+}
+
 } //namsepace Stamping
 
 } //namespace ASTex

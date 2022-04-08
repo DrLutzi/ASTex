@@ -81,6 +81,7 @@ public :
 	void exportToTXT(std::string savefile);
 
 	void project(ImageType &res);
+	void project(const ImageType &input, ImageType &res);
 
 	void back_project(const ImageType &coord, ImageType& res) const;
 
@@ -272,15 +273,22 @@ void PCA<T>::exportToTXT(std::string savefile)
 template<typename T>
 void PCA<T>::project(ImageType &res)
 {
-	res.initItk(m_im.width(), m_im.height());
+	project(m_im, res);
+	return;
+}
 
-	for (int x = 0; x < m_im.width(); ++x)
+template<typename T>
+void PCA<T>::project(const ImageType &input, ImageType &res)
+{
+	res.initItk(input.width(), input.height());
+
+	for (int x = 0; x < input.width(); ++x)
 	{
-		for (int y = 0; y < m_im.height(); ++y)
+		for (int y = 0; y < input.height(); ++y)
 		{
-			res.pixelAbsolute(x,y)[0] = (m_im.pixelAbsolute(x,y)[0]-m_meancolor[0]) * m_v1[0] + (m_im.pixelAbsolute(x,y)[1]-m_meancolor[1]) * m_v1[1] + (m_im.pixelAbsolute(x,y)[2]-m_meancolor[2]) * m_v1[2];
-			res.pixelAbsolute(x,y)[1] = (m_im.pixelAbsolute(x,y)[0]-m_meancolor[0]) * m_v2[0] + (m_im.pixelAbsolute(x,y)[1]-m_meancolor[1]) * m_v2[1] + (m_im.pixelAbsolute(x,y)[2]-m_meancolor[2]) * m_v2[2];
-			res.pixelAbsolute(x,y)[2] = (m_im.pixelAbsolute(x,y)[0]-m_meancolor[0]) * m_v3[0] + (m_im.pixelAbsolute(x,y)[1]-m_meancolor[1]) * m_v3[1] + (m_im.pixelAbsolute(x,y)[2]-m_meancolor[2]) * m_v3[2];
+			res.pixelAbsolute(x,y)[0] = (input.pixelAbsolute(x,y)[0]-m_meancolor[0]) * m_v1[0] + (input.pixelAbsolute(x,y)[1]-m_meancolor[1]) * m_v1[1] + (input.pixelAbsolute(x,y)[2]-m_meancolor[2]) * m_v1[2];
+			res.pixelAbsolute(x,y)[1] = (input.pixelAbsolute(x,y)[0]-m_meancolor[0]) * m_v2[0] + (input.pixelAbsolute(x,y)[1]-m_meancolor[1]) * m_v2[1] + (input.pixelAbsolute(x,y)[2]-m_meancolor[2]) * m_v2[2];
+			res.pixelAbsolute(x,y)[2] = (input.pixelAbsolute(x,y)[0]-m_meancolor[0]) * m_v3[0] + (input.pixelAbsolute(x,y)[1]-m_meancolor[1]) * m_v3[1] + (input.pixelAbsolute(x,y)[2]-m_meancolor[2]) * m_v3[2];
 		}
 	}
 

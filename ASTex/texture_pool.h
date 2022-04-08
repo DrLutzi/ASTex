@@ -7,7 +7,7 @@
 namespace ASTex
 {
 
-template<typename I, typename MASK_TYPE>
+template<typename I, typename MASK_TYPE = char>
 class TexturePool
 {
 public:
@@ -38,6 +38,7 @@ public:
 
 	size_t size() const;
 	const TransformedTexture &operator[](size_t i) const;
+	TransformedTexture &operator[](size_t i);
 
 	void addTexture(const ImageType &texture, bool periodicity=false);
 	void addTransformationMatrix(const MatrixType &transformation);
@@ -95,6 +96,12 @@ const typename TexturePool<I, MASK_TYPE>::TransformedTexture &TexturePool<I, MAS
 		warned = true;
 	}
 	return m_pool[i];
+}
+
+template<typename I, typename MASK_TYPE>
+typename TexturePool<I, MASK_TYPE>::TransformedTexture &TexturePool<I, MASK_TYPE>::operator[](size_t i)
+{
+	return const_cast<TransformedTexture &>(m_pool[i]);
 }
 
 template<typename I, typename MASK_TYPE>

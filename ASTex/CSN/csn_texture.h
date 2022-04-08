@@ -9,7 +9,6 @@
 #include "ASTex/colorspace_filters.h"
 #include "ASTex/easy_io.h"
 #include "ASTex/histogram.h"
-#include "ASTex/rpn_utils.h" //delete this idiot
 
 //#define CSN_ENABLE_DEBUG
 #ifdef CSN_ENABLE_DEBUG
@@ -67,6 +66,10 @@ public:
 	const Eigen::Vector2d &cycleX() const;
 	const Eigen::Vector2d &cycleY() const;
 
+	static PcaImageType toPcaImageType(const ImageType &texture);
+	static ImageType fromPcaImageType(const PcaImageType &pcaTexture);
+	static Eigen::Vector2d fract(const Eigen::Vector2d &v);
+
 private:
 
 	PcaPixelType proceduralTilingAndBlending(const PcaImageType &image, Eigen::Vector2d uv) const;
@@ -75,7 +78,6 @@ private:
 	Eigen::Vector2d hash(const Eigen::Vector2d &p) const;
 	Eigen::Vector2d cyclicHash(const Eigen::Vector2d &p) const;
 	Eigen::Vector2d floor(const Eigen::Vector2d &v) const;
-	Eigen::Vector2d fract(const Eigen::Vector2d &v) const;
 
 	void estimateCycles_periodic(const Eigen::Vector2d &guidX, const Eigen::Vector2d &guidY, int errorWindow);
 
@@ -189,11 +191,6 @@ void CSN_Texture<I>::setCyclicTransferPolicy(unsigned radius, unsigned samples)
 	m_cyclicTransferSamples = samples;
 }
 
-
-
-
-
-
 template<typename I>
 typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, unsigned height)
 {
@@ -224,49 +221,6 @@ typename CSN_Texture<I>::ImageType CSN_Texture<I>::synthesize(unsigned width, un
 	output.initItk(width, height, true);
 	LutType lut;
 	lut.initItk(128, 1);
-	DataType *dataPix;
-	const DataType *dataPixConst;
-
-	auto toPcaImageType = [&] (const ImageType &texture) -> PcaImageType
-	{
-		PcaImageType pcaTexture;
-		pcaTexture.initItk(texture.width(), texture.height());
-		pcaTexture.for_all_pixels([&] (PcaPixelType &pcaPix, int x, int y)
-		{
-			const PixelType &pix = texture.pixelAbsolute(x, y);
-			dataPixConst = reinterpret_cast<const DataType *>(&pix);
-			if(pixelSize == 3)
-			{ //image is rgb
-				for(unsigned i=0; i<3; ++i)
-				{
-					pcaPix[i] = dataPixConst[i];
-				}
-			}
-			else
-			{ //image is most likely gray
-				for(unsigned i=0; i<3; ++i)
-				{
-					unsigned j=i%pixelSize;
-					pcaPix[i] = dataPixConst[j];
-				}
-			}
-		});
-		return pcaTexture;
-	};
-
-	auto fromPcaImageType = [&] (const PcaImageType &pcaTexture) -> ImageType
-	{
-		ImageType texture;
-		texture.initItk(pcaTexture.width(), pcaTexture.height());
-		pcaTexture.for_all_pixels([&] (const PcaPixelType &pcaPix, int x, int y)
-		{
-			PixelType &pix = texture.pixelAbsolute(x, y);
-			dataPix = reinterpret_cast<DataType *>(&pix);
-			for(unsigned i=0; i<pixelSize; ++i)
-				dataPix[i] = pcaPix[i];
-		});
-		return texture;
-	};
 
 	PcaImageType pcaTexture = toPcaImageType(m_exemplar);
 	if(m_useYCbCr)
@@ -1309,6 +1263,55 @@ const Eigen::Vector2d &CSN_Texture<I>::cycleY() const
 }
 
 template<typename I>
+typename CSN_Texture<I>::PcaImageType CSN_Texture<I>::toPcaImageType(const ImageType &texture)
+{
+	unsigned int pixelSize = sizeof(PixelType)/sizeof(DataType);
+	DataType *dataPix;
+	const DataType *dataPixConst;
+	PcaImageType pcaTexture;
+	pcaTexture.initItk(texture.width(), texture.height());
+	pcaTexture.for_all_pixels([&] (PcaPixelType &pcaPix, int x, int y)
+	{
+		const PixelType &pix = texture.pixelAbsolute(x, y);
+		dataPixConst = reinterpret_cast<const DataType *>(&pix);
+		if(pixelSize == 3)
+		{ //image is rgb
+			for(unsigned i=0; i<3; ++i)
+			{
+				pcaPix[i] = dataPixConst[i];
+			}
+		}
+		else
+		{ //image is most likely gray
+			for(unsigned i=0; i<3; ++i)
+			{
+				unsigned j=i%pixelSize;
+				pcaPix[i] = dataPixConst[j];
+			}
+		}
+	});
+	return pcaTexture;
+}
+
+template<typename I>
+typename CSN_Texture<I>::ImageType CSN_Texture<I>::fromPcaImageType(const PcaImageType &pcaTexture)
+{
+	unsigned int pixelSize = sizeof(PixelType)/sizeof(DataType);
+	DataType *dataPix;
+	const DataType *dataPixConst;
+	ImageType texture;
+	texture.initItk(pcaTexture.width(), pcaTexture.height());
+	pcaTexture.for_all_pixels([&] (const PcaPixelType &pcaPix, int x, int y)
+	{
+		PixelType &pix = texture.pixelAbsolute(x, y);
+		dataPix = reinterpret_cast<DataType *>(&pix);
+		for(unsigned i=0; i<pixelSize; ++i)
+			dataPix[i] = pcaPix[i];
+	});
+	return texture;
+}
+
+template<typename I>
 typename CSN_Texture<I>::PcaPixelType CSN_Texture<I>::proceduralTilingAndBlending (const PcaImageType &image,
 																				   Eigen::Vector2d uv) const
 {
@@ -1429,7 +1432,7 @@ Eigen::Vector2d CSN_Texture<I>::floor(const Eigen::Vector2d &v) const
 }
 
 template<typename I>
-Eigen::Vector2d CSN_Texture<I>::fract(const Eigen::Vector2d &v) const
+Eigen::Vector2d CSN_Texture<I>::fract(const Eigen::Vector2d &v)
 {
 	Eigen::Vector2d w;
 	w[0] = v[0]-std::floor(v[0]);

@@ -78,6 +78,8 @@ target_sources (${PROJECT_NAME} PRIVATE
 	CSN/tpsd.h
 
 	autoregressive.h
+
+	Perioblend/perioblend.h
 )
 
 target_sources (${PROJECT_NAME} PRIVATE

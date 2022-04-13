@@ -11,32 +11,36 @@
 #include "ASTex/histogram.h"
 #include "ASTex/texture_pool.h"
 #include "ASTex/CSN/csn_texture.h"
+#include "ASTex/Perioblend/affineTransformations.h"
 
 namespace ASTex
 {
 
+/**
+ * @brief The TandBFunctionType class -- see Perioblend::addFunction for all the infos
+ */
 class TandBFunctionType
 {
 public:
 	TandBFunctionType() {}
 
 	using BlendingFunctionType = std::function<double (double u, double v)>;
-	using TransitionFunctionType = std::function<Eigen::Vector2i (double u, double v)>;
+	using TilingFunctionType = std::function<Eigen::Vector2i (double u, double v)>;
 
-	TransitionFunctionType transitionFunction;
+	TilingFunctionType tilingFunction;
 	BlendingFunctionType blendingFunction;
 
-	ImageRGBd visualizeTransition(unsigned int width, unsigned int height, double uMax, double vMax) const;
+	ImageRGBd visualizeTiling(unsigned int width, unsigned int height, double uMax, double vMax) const;
 	ImageGrayd visualizeBlending(unsigned int width, unsigned int height, double uMax, double vMax) const;
 };
 
-ImageRGBd TandBFunctionType::visualizeTransition(unsigned int width, unsigned int height, double uMax, double vMax) const
+ImageRGBd TandBFunctionType::visualizeTiling(unsigned int width, unsigned int height, double uMax, double vMax) const
 {
 	ImageRGBd visualization;
 	visualization.initItk(width, height, true);
 	Eigen::Vector2i min, max;
-	min = transitionFunction(0, 0);
-	max = transitionFunction(0, 0);
+	min = tilingFunction(0, 0);
+	max = tilingFunction(0, 0);
 	visualization.for_all_pixels([&] (ImageRGBd::PixelType &pix, int x, int y)
 	{
 		(void) pix;
@@ -45,7 +49,7 @@ ImageRGBd TandBFunctionType::visualizeTransition(unsigned int width, unsigned in
 		u = u*uMax;
 		v = double(y)/(visualization.height()-1);
 		v = v*vMax;
-		Eigen::Vector2i value = transitionFunction(u, v);
+		Eigen::Vector2i value = tilingFunction(u, v);
 		min[0] = value[0] < min[0] ? value[0] : min[0];
 		min[1] = value[1] < min[1] ? value[1] : min[1];
 		max[0] = value[0] > max[0] ? value[0] : max[0];
@@ -61,7 +65,7 @@ ImageRGBd TandBFunctionType::visualizeTransition(unsigned int width, unsigned in
 		u = u*uMax;
 		v = double(y)/(visualization.height()-1);
 		v = v*vMax;
-		Eigen::Vector2i value = transitionFunction(u, v);
+		Eigen::Vector2i value = tilingFunction(u, v);
 		Eigen::Vector2d valueDouble = value.cast<double>();
 		valueDouble[0] = (valueDouble[0] - minDouble[0])/(maxDouble[0] - minDouble[0]);
 		valueDouble[1] = (valueDouble[1] - minDouble[1])/(maxDouble[1] - minDouble[1]);
@@ -103,8 +107,12 @@ ImageGrayd TandBFunctionType::visualizeBlending(unsigned int width, unsigned int
 	return visualization;
 }
 
+
 template<typename I>
-class Perioblend
+/**
+ * @brief The TilingAndBlending class represents a generic tiling and blending process for texture synthesis.
+ */
+class TilingAndBlending
 {
 public:
 
@@ -123,17 +131,62 @@ public:
 	using ProceduralBlendingType	= std::function<PcaImageType(const PcaImageType &)>;
 	using PtrImageType				= ImageGrayu64;
 
-	Perioblend();
+	TilingAndBlending();
+
+	/**
+	 * @brief synthesize_stationary uses the first texture added to synthesize a texture using a by-example stationary ergodic synthesis.
+	 * You need to have added at least two TandBFunctionType using addFunction for it to produce good results.
+	 * @return the synthesized texture.
+	 */
 	ImageType synthesize_stationary();
+
+	/**
+	 * @brief synthesize_periodic uses all textures added to synthesize a texture using a by-examples periodic non ergodic synthesis.
+	 * You need to have added at least two TandBFunctionType using addFunction for it to produce good results.
+	 * @return the synthesized texture.
+	 */
 	ImageType synthesize_periodic();
+
+	/**
+	 * @brief addTexture adds a texture to the pool. Only useful to be called more than once for periodic, non ergodic synthesis.
+	 * @param image examplar texture.
+	 */
 	void addTexture(const ImageType &image);
+
+	/**
+	 * @brief setProcessType unused yet
+	 */
 	void setProcessType(ProcessType);
+
+	/**
+	 * @brief addFunction add a user-defind blending + tiling function.
+	 * The blending function must reach 0 where the tiling function changes its returned index, otherwise the results will have seams.
+	 * You can add as many as you want, although this class was re-purposed to usually have only two or three.
+	 * Different functions are meant to overlap.
+	 * @param tabft user-defind blending + tiling function
+	 */
 	void addFunction(const TandBFunctionType &tabft);
+
+	/**
+	 * @brief setSingularityBlendingFunction sets a blending function to hide singularities.
+	 * @param sbf user-defined blending function.
+	 */
 	void setSingularityBlendingFunction(const TandBFunctionType::BlendingFunctionType &sbf);
 	void setWidth(unsigned int width);
 	void setHeight(unsigned int height);
 	void setUVScale(double uScale, double vScale);
+
+	/**
+	 * @brief setUseHistogramTransfer if the histogram transfer of [HN18] is used.
+	 * @param useTransfer boolean
+	 */
 	void setUseHistogramTransfer(bool useTransfer);
+
+	/**
+	 * @brief setRandomAffineTransform the random affine transform generator used to generate random rotations in each tile.
+	 * @param randomAffineTransform -- see the related class.
+	 */
+	void setRandomAffineTransform(const RandomAffineTransform &randomAffineTransform);
 
 	ImageGrayd visualizeBlendingSum(unsigned int width, unsigned int height, double uMax, double vMax);
 	ImageRGBd visualizeSynthesis(unsigned int width, unsigned int height);
@@ -141,6 +194,12 @@ public:
 private:
 
 	Eigen::Vector2d hash(const Eigen::Vector2d &p) const;
+	/**
+	 * @brief cantorPairingFn attributes one int from two integers, used for seeding.
+	 * @param v vector of two integers
+	 * @return one integer
+	 */
+	int cantorPairingFunction(const Eigen::Vector2i &v) const;
 
 	TexturePool<ImageType>	m_texturePool;
 	std::list<TandBFunctionType> m_functions;
@@ -151,10 +210,11 @@ private:
 	double					m_uScale;
 	double					m_vScale;
 	bool					m_useTransfer;
+	RandomAffineTransform	m_randomAffineTransform;
 };
 
 template<typename I>
-Perioblend<I>::Perioblend() :
+TilingAndBlending<I>::TilingAndBlending() :
 	m_texturePool(),
 	m_functions(),
 	m_singularityBlendingFunction(nullptr),
@@ -163,11 +223,12 @@ Perioblend<I>::Perioblend() :
 	m_height(1024),
 	m_uScale(1.0),
 	m_vScale(1.0),
-	m_useTransfer(true)
+	m_useTransfer(true),
+	m_randomAffineTransform()
 {}
 
 template<typename I>
-typename Perioblend<I>::ImageType Perioblend<I>::synthesize_stationary()
+typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_stationary()
 {
 	m_texturePool.generate();
 	const ImageType &texture = m_texturePool[0].texture;
@@ -233,11 +294,12 @@ typename Perioblend<I>::ImageType Perioblend<I>::synthesize_stationary()
 		}
 		for(auto const &fonctions : m_functions)
 		{
-			Eigen::Vector2i transition = fonctions.transitionFunction(u * m_uScale, v * m_vScale);
-			Eigen::Vector2d uvTexture = hash(transition.cast<double>());
+			Eigen::Vector2i tile = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
+			Eigen::Vector2d uvTexture = hash(tile.cast<double>());
 			uvTexture[0] += u;
 			uvTexture[1] += v;
-			Eigen::Vector2d uvTextureFract = CSN::CSN_Texture<I>::fract(uvTexture);
+			AffineTransform affT = m_randomAffineTransform.generate(true, cantorPairingFunction(tile));
+			Eigen::Vector2d uvTextureFract = CSN::CSN_Texture<I>::fract(affT.transform()*uvTexture);
 			PixelPosType xyTexture;
 			xyTexture[0] = int(uvTextureFract[0] * pcaTexture.width()) % pcaTexture.width();
 			xyTexture[1] = int(uvTextureFract[1] * pcaTexture.height()) % pcaTexture.height();
@@ -273,7 +335,7 @@ typename Perioblend<I>::ImageType Perioblend<I>::synthesize_stationary()
 }
 
 template<typename I>
-typename Perioblend<I>::ImageType Perioblend<I>::synthesize_periodic()
+typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_periodic()
 {
 	m_texturePool.generate();
 	TexturePool<PcaImageType> texturePool;
@@ -325,7 +387,7 @@ typename Perioblend<I>::ImageType Perioblend<I>::synthesize_periodic()
 		}
 		for(auto const &fonctions : m_functions)
 		{
-			Eigen::Vector2i transition = fonctions.transitionFunction(u * m_uScale, v * m_vScale);
+			Eigen::Vector2i transition = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
 			int indexTexture1D = int(transition[0]*41 + transition[1]*97)%texturePool.size();
 			Eigen::Vector2d uvTextureFract = CSN::CSN_Texture<I>::fract(uvTexture);
 			PixelPosType xyTexture;
@@ -355,56 +417,62 @@ typename Perioblend<I>::ImageType Perioblend<I>::synthesize_periodic()
 }
 
 template<typename I>
-void Perioblend<I>::addTexture(const ImageType &texture)
+void TilingAndBlending<I>::addTexture(const ImageType &texture)
 {
 	m_texturePool.addTexture(texture);
 }
 
 template<typename I>
-void Perioblend<I>::setProcessType(ProcessType processType)
+void TilingAndBlending<I>::setProcessType(ProcessType processType)
 {
 	m_processType = processType;
 }
 
 template<typename I>
-void Perioblend<I>::addFunction(const TandBFunctionType &tabft)
+void TilingAndBlending<I>::addFunction(const TandBFunctionType &tabft)
 {
 	m_functions.push_back(tabft);
 }
 
 template<typename I>
-void Perioblend<I>::setSingularityBlendingFunction(const TandBFunctionType::BlendingFunctionType &sbf)
+void TilingAndBlending<I>::setSingularityBlendingFunction(const TandBFunctionType::BlendingFunctionType &sbf)
 {
 	m_singularityBlendingFunction = sbf;
 }
 
 template<typename I>
-void Perioblend<I>::setWidth(unsigned int width)
+void TilingAndBlending<I>::setWidth(unsigned int width)
 {
 	m_width	= width;
 }
 
 template<typename I>
-void Perioblend<I>::setHeight(unsigned int height)
+void TilingAndBlending<I>::setHeight(unsigned int height)
 {
 	m_height = height;
 }
 
 template<typename I>
-void Perioblend<I>::setUVScale(double uScale, double vScale)
+void TilingAndBlending<I>::setUVScale(double uScale, double vScale)
 {
 	m_uScale = uScale;
 	m_vScale = vScale;
 }
 
 template<typename I>
-void Perioblend<I>::setUseHistogramTransfer(bool useTransfer)
+void TilingAndBlending<I>::setUseHistogramTransfer(bool useTransfer)
 {
 	m_useTransfer = useTransfer;
 }
 
 template<typename I>
-Eigen::Vector2d Perioblend<I>::hash(const Eigen::Vector2d &p) const
+void TilingAndBlending<I>::setRandomAffineTransform(const RandomAffineTransform &randomAffineTransform)
+{
+	m_randomAffineTransform = randomAffineTransform;
+}
+
+template<typename I>
+Eigen::Vector2d TilingAndBlending<I>::hash(const Eigen::Vector2d &p) const
 {
 	Eigen::Matrix2d hashMat;
 	hashMat << 127.1, 269.5, 311.7, 183.3;
@@ -415,7 +483,13 @@ Eigen::Vector2d Perioblend<I>::hash(const Eigen::Vector2d &p) const
 }
 
 template<typename I>
-ImageGrayd Perioblend<I>::visualizeBlendingSum(unsigned int width, unsigned int height, double uMax, double vMax)
+int TilingAndBlending<I>::cantorPairingFunction(const Eigen::Vector2i &v) const
+{
+	return (v[0] + v[1]) * (v[0] + v[1] + 1) / 2 + v[0];
+}
+
+template<typename I>
+ImageGrayd TilingAndBlending<I>::visualizeBlendingSum(unsigned int width, unsigned int height, double uMax, double vMax)
 {
 	ImageGrayd visualization;
 	visualization.initItk(width, height, true);
@@ -456,7 +530,7 @@ ImageGrayd Perioblend<I>::visualizeBlendingSum(unsigned int width, unsigned int 
 }
 
 template<typename I>
-ImageRGBd Perioblend<I>::visualizeSynthesis(unsigned int width, unsigned int height)
+ImageRGBd TilingAndBlending<I>::visualizeSynthesis(unsigned int width, unsigned int height)
 {
 	ImageRGBd visualization;
 	visualization.initItk(width, height, true);
@@ -473,7 +547,7 @@ ImageRGBd Perioblend<I>::visualizeSynthesis(unsigned int width, unsigned int hei
 		}
 		for(auto const &fonctions : m_functions)
 		{
-			Eigen::Vector2i transition = fonctions.transitionFunction(u * m_uScale, v * m_vScale);
+			Eigen::Vector2i transition = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
 			Eigen::Vector2d uvTexture = hash(transition.cast<double>());
 			uvTexture[0] += u * m_uScale;
 			uvTexture[1] += v * m_vScale;

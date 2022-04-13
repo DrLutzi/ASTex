@@ -64,7 +64,7 @@ int main(int argc, char **argv)
 		float sinV = std::sin(v*M_PI);
 		return sqrt(sinU*sinU * sinV*sinV);
 	};
-	bft1.transitionFunction = [&] (double u, double v)
+	bft1.tilingFunction = [&] (double u, double v)
 	{
 		Eigen::Vector2i vec;
 		vec[0] = int(u)*63;
@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 		return vec;
 	};
 	ImageGrayd bft1Blending = bft1.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	ImageRGBd bft1Transition = bft1.visualizeTransition(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bft1Transition = bft1.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	IO::save01_in_u8(bft1Blending, std::string("/home/nlutz/bft1Blending.png"));
 	IO::save01_in_u8(bft1Transition, std::string("/home/nlutz/bft1Transition.png"));
 
@@ -91,7 +91,7 @@ int main(int argc, char **argv)
 		float sinV = std::sin(v*M_PI);
 		return sqrt(sinU*sinU * sinV*sinV);
 	};
-	bft2.transitionFunction = [&] (double u, double v)
+	bft2.tilingFunction = [&] (double u, double v)
 	{
 		Eigen::Vector2i vec;
 		vec[0] = int(u + 0.5)*127;
@@ -99,7 +99,7 @@ int main(int argc, char **argv)
 		return vec;
 	};
 	ImageGrayd bft2Blending = bft2.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	ImageRGBd bft2Transition = bft2.visualizeTransition(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bft2Transition = bft2.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	IO::save01_in_u8(bft2Blending, std::string("/home/nlutz/bft2Blending.png"));
 	IO::save01_in_u8(bft2Transition, std::string("/home/nlutz/bft2Transition.png"));
 
@@ -121,6 +121,9 @@ int main(int argc, char **argv)
 		return 0.05f*cosu*cosv*cosu*cosv;
 	};
 
+	RandomAffineTransform rAffT;
+	rAffT.addAngle(RandomAffineTransform::AngleRangeType(std::make_pair(-M_PI, M_PI)));
+
 //	BlendingFunctionType bftNeutral;
 //	bftNeutral.blendingFunction = [&] (double u, double v)
 //	{
@@ -135,7 +138,7 @@ int main(int argc, char **argv)
 	std::string name_file = IO::remove_path(argv[1]);
 	std::string name_noext = IO::remove_ext(name_file);
 	ImageType im_out;
-	Perioblend<ImageType> perioBlend;
+	TilingAndBlending<ImageType> perioBlend;
 	for(int i=1; i<argc; ++i)
 	{
 		ImageType im_in, im_out;
@@ -151,6 +154,7 @@ int main(int argc, char **argv)
 	perioBlend.setHeight(outputHeight);
 	perioBlend.setUVScale(4.0, 4.0);
 	perioBlend.setUseHistogramTransfer(false);
+	perioBlend.setRandomAffineTransform(rAffT);
 
 	ImageGrayd bftSumBlending = perioBlend.visualizeBlendingSum(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	IO::save01_in_u8(bftSumBlending, std::string("/home/nlutz/bftSumBlending.png"));

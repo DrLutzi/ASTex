@@ -80,6 +80,8 @@ target_sources (${PROJECT_NAME} PRIVATE
 	autoregressive.h
 
 	Perioblend/perioblend.h
+	Perioblend/affineTransformations.h
+	Perioblend/affineTransformations.cpp
 )
 
 target_sources (${PROJECT_NAME} PRIVATE

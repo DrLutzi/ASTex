@@ -2,14 +2,87 @@
 #include <ASTex/Perioblend/perioblend.h>
 #include <ASTex/easy_io.h>
 
+typedef enum {NO_ISOTROPY=0, FULL_ISOTROPY=1, PI_ISOTROPY=2, HALF_PI_ISOTROPY=3, UNSPECIFIED_ISOTROPY=4} Isotropy_enum_t;
+
+typedef struct
+{
+	bool useHistogramTransfer;
+	unsigned int width;
+	unsigned int height;
+	Isotropy_enum_t isotropy;
+	double uScale;
+	double vScale;
+	bool useSingularityHider;
+} ArgumentsType;
+
+ArgumentsType loadArguments(std::string argFilename)
+{
+	std::ifstream ifs(argFilename);
+	assert(ifs);
+
+	ArgumentsType arguments;
+
+	std::string line;
+	while( std::getline(ifs, line) )
+	{
+		std::istringstream is_line(line);
+		std::string key;
+		if( std::getline(is_line, key, '=') )
+		{
+			std::string value;
+			if( std::getline(is_line, value) )
+			{
+				if(key == "useHistogramTransfer")
+				{
+					arguments.useHistogramTransfer = std::stoi(value);
+				}
+				else if(key == "width")
+				{
+					arguments.width = std::stoi(value);
+				}
+				else if(key == "height")
+				{
+					arguments.height = std::stoi(value);
+				}
+				else if(key == "isotropy")
+				{
+					int vInt = std::stoi(value);
+					if(vInt <= 4 && vInt >= 0)
+					{
+						arguments.isotropy = Isotropy_enum_t(vInt);
+					}
+					else
+					{
+						arguments.isotropy = UNSPECIFIED_ISOTROPY;
+					}
+				}
+				else if(key == "uScale")
+				{
+					arguments.uScale = std::stod(value);
+				}
+				else if(key == "vScale")
+				{
+					arguments.vScale = std::stod(value);
+				}
+				else if(key == "useSingularityHider")
+				{
+					arguments.useSingularityHider = std::stoi(value);
+				}
+			}
+		}
+	}
+	return arguments;
+}
+
 int main(int argc, char **argv)
 {
-	if(argc < 2)
+	if(argc < 3)
 	{
 		std::cerr << "Usage: " << std::endl;
 		std::cerr << argv[0] << " <in_texture> [in_texture2]..." << std::endl;
 		return EXIT_FAILURE;
 	}
+	ArgumentsType arguments=loadArguments(argv[1]);
 	unsigned int visualizationWidth = 256;
 	unsigned int visualizationHeight = 128;
 	double visualizationU = 4.0;
@@ -122,7 +195,28 @@ int main(int argc, char **argv)
 	};
 
 	RandomAffineTransform rAffT;
-	rAffT.addAngle(RandomAffineTransform::AngleRangeType(std::make_pair(-M_PI, M_PI)));
+	if(arguments.isotropy == FULL_ISOTROPY)
+	{
+		rAffT.addAngle(RandomAffineTransform::AngleRangeType(std::make_pair(-M_PI, M_PI)));
+	}
+	else if(arguments.isotropy != UNSPECIFIED_ISOTROPY)
+	{
+		rAffT.addAngle(0);
+		if(arguments.isotropy == PI_ISOTROPY || arguments.isotropy == HALF_PI_ISOTROPY)
+		{
+			rAffT.addAngle(M_PI);
+		}
+		if(arguments.isotropy == HALF_PI_ISOTROPY)
+		{
+			rAffT.addAngle(M_PI/2.0);
+			rAffT.addAngle(3.0*M_PI / 2.0);
+		}
+	}
+	else
+	{
+		//custom program
+		rAffT.addAngle(std::make_pair(-M_PI/4.0, M_PI/4.0));
+	}
 
 //	BlendingFunctionType bftNeutral;
 //	bftNeutral.blendingFunction = [&] (double u, double v)
@@ -135,25 +229,26 @@ int main(int argc, char **argv)
 //		return vec;
 //	};
 
-	std::string name_file = IO::remove_path(argv[1]);
+	std::string name_file = IO::remove_path(argv[2]);
 	std::string name_noext = IO::remove_ext(name_file);
 	ImageType im_out;
 	TilingAndBlending<ImageType> perioBlend;
-	for(int i=1; i<argc; ++i)
+	for(int i=2; i<argc; ++i)
 	{
 		ImageType im_in, im_out;
 		IO::loadu8_in_01(im_in, argv[i]);
 		perioBlend.addTexture(im_in);
 	}
+
 	perioBlend.addFunction(bft1);
 	perioBlend.addFunction(bft2);
 	perioBlend.setSingularityBlendingFunction(blendingSingularityFunction);
 	unsigned int outputWidth = 2048;
 	unsigned int outputHeight = 1024;
-	perioBlend.setWidth(outputWidth);
-	perioBlend.setHeight(outputHeight);
-	perioBlend.setUVScale(4.0, 4.0);
-	perioBlend.setUseHistogramTransfer(false);
+	perioBlend.setWidth(arguments.width);
+	perioBlend.setHeight(arguments.height);
+	perioBlend.setUVScale(arguments.uScale, arguments.vScale);
+	perioBlend.setUseHistogramTransfer(arguments.useHistogramTransfer);
 	perioBlend.setRandomAffineTransform(rAffT);
 
 	ImageGrayd bftSumBlending = perioBlend.visualizeBlendingSum(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
@@ -179,7 +274,15 @@ int main(int argc, char **argv)
 			pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
 	});
 
-	IO::save01_in_u8(im_out, std::string("/home/nlutz/") + name_noext + "_out.png");
+	IO::save01_in_u8(im_out, std::string("/home/nlutz/") + name_noext + "_"
+					 + std::to_string(arguments.width) + "x"
+					 + std::to_string(arguments.height) +  "_uScale="
+					 + std::to_string(arguments.uScale) + "_vScale="
+					 + std::to_string(arguments.vScale) + (arguments.useHistogramTransfer ? "_HT_" : "_noHT_")
+					 + (arguments.isotropy == NO_ISOTROPY ? "noIso" :
+						(arguments.isotropy == FULL_ISOTROPY ? "fullIso" :
+						(arguments.isotropy == PI_ISOTROPY ? "piIso" :
+						(arguments.isotropy == HALF_PI_ISOTROPY ? "halfPiIso" : "unspecifiedIso")))) + ".png");
 	IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_out.png"));
 	return 0;
 }

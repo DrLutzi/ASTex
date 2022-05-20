@@ -2,7 +2,71 @@
 #include <ASTex/Perioblend/perioblend.h>
 #include <ASTex/easy_io.h>
 
+#define SQRT3DIV2 0.86602540378
+#define SQRT3 1.73205080757
+#define SQRT2DIV2 0.70710678118
+
+typedef struct
+{
+	Eigen::Vector2d vectors[2];
+} CyclePair;
+
+using CycleMapType = std::map<std::string, CyclePair>;
+
+/**
+ * @brief loadCycles load a cycles file.
+ * Format of the file (don't copy the = symbols):
+ * [<texture name>					//texture name with no extension or directory
+ * <denominator> <denominator>		//two denomionators of the first cycle (cycle is [1/denominator]^2)
+ * <denominator> <denominator>]*	//two denomionators of the second cycle
+ * =======
+ * Exemple:
+ * =======
+ * bricks5
+ * 14	20
+ * 7	0
+ *
+ * herringbone2
+ * 7	0
+ * 0	26
+ * =======
+ */
+CycleMapType loadCycles(std::string filename)
+{
+	CycleMapType knownCycles;
+	std::string name;
+	CyclePair cycles;
+	std::ifstream ifs(filename);
+	if(!ifs)
+	{
+		return knownCycles;
+	}
+	while(!ifs.eof())
+	{
+		ifs >> name;
+		if(!ifs.eof()) //I hate C++ sometimes
+		{
+			double readNumber1, readNumber2;
+			ifs >> readNumber1 >> readNumber2;
+			if((readNumber1>0 && readNumber1<1) || (readNumber2>0 && readNumber2<1))
+				cycles.vectors[0] = Eigen::Vector2d(readNumber1, readNumber2);
+			else
+				cycles.vectors[0] = Eigen::Vector2d(readNumber1 == 0 ? 0 : 1.0/readNumber1,
+													readNumber2 == 0 ? 0 : 1.0/readNumber2);
+			ifs >> readNumber1 >> readNumber2;
+			if((readNumber1>0 && readNumber1<1) || (readNumber2>0 && readNumber2<1))
+				cycles.vectors[1] = Eigen::Vector2d(readNumber1, readNumber2);
+			else
+				cycles.vectors[1] = Eigen::Vector2d(readNumber1 == 0 ? 0 : 1.0/readNumber1,
+													readNumber2 == 0 ? 0 : 1.0/readNumber2);
+			knownCycles.insert({name, cycles});
+		}
+	}
+	return knownCycles;
+}
+
 typedef enum {NO_ISOTROPY=0, FULL_ISOTROPY=1, PI_ISOTROPY=2, HALF_PI_ISOTROPY=3, UNSPECIFIED_ISOTROPY=4} Isotropy_enum_t;
+typedef enum {SQUARE_SQUARE=0, ALTSQUARE_TRIANGULAR=1, ROTSQUARE_ROTSQUARE=2, HEXAGONAL_TRIANGULAR=3} Tiling_enum_t;
 
 typedef struct
 {
@@ -13,6 +77,7 @@ typedef struct
 	double uScale;
 	double vScale;
 	bool useSingularityHider;
+	Tiling_enum_t tiling;
 } ArgumentsType;
 
 ArgumentsType loadArguments(std::string argFilename)
@@ -68,10 +133,85 @@ ArgumentsType loadArguments(std::string argFilename)
 				{
 					arguments.useSingularityHider = std::stoi(value);
 				}
+				else if(key == "tiling")
+				{
+					arguments.tiling = Tiling_enum_t(std::stoi(value));
+				}
 			}
 		}
 	}
 	return arguments;
+}
+
+int mod3( int n )
+{
+	return (n<0) ? 2-((2-n)%3) : n%3;
+}
+
+Eigen::Vector2d floor(Eigen::Vector2d q)
+{
+	return Eigen::Vector2d(std::floor(q.x()), std::floor(q.y()));
+}
+
+Eigen::Vector3d floor(Eigen::Vector3d q)
+{
+	return Eigen::Vector3d(std::floor(q.x()), std::floor(q.y()), std::floor(q.z()));
+}
+
+Eigen::Vector2d fract(Eigen::Vector2d q)
+{
+	return Eigen::Vector2d(q.x() - std::floor(q.x()), q.y() - std::floor(q.y()));
+}
+
+Eigen::Vector3d fract(Eigen::Vector3d q)
+{
+	return Eigen::Vector3d(q.x() - std::floor(q.x()), q.y() - std::floor(q.y()), q.z() - std::floor(q.z()));
+}
+
+Eigen::Vector2i hexagonGetID(Eigen::Vector2d p )
+{
+	Eigen::Vector2d  q = Eigen::Vector2d( p.x(), p.x()*0.5+p.y()*SQRT3DIV2);
+
+	Eigen::Vector2i i = floor(q).cast<int>();
+	Eigen::Vector2d  f =       fract(q);
+
+	int v = mod3(i.x()+i.y());
+	Eigen::Vector2i id = i + Eigen::Vector2i(v, v); //TODO : v, 0 ou v, v ?
+	if( v==2 ) id -= (f.x()>f.y())?Eigen::Vector2i(1,2):Eigen::Vector2i(2,1);
+
+	return Eigen::Vector2i( id.x(), (2*id.y()-id.x())/3 );
+}
+
+// return the center of an hexagon
+Eigen::Vector2d hexagonCenFromID(Eigen::Vector2i id)
+{
+	return Eigen::Vector2d(float(id.x()),float(id.y())*SQRT3);
+}
+//////////////////////////////////////////////////////////////////////////
+
+float hexagonDistanceFromEdge(Eigen::Vector2i id, Eigen::Vector2d p)
+{
+	Eigen::Vector2d c = hexagonCenFromID(id);
+	Eigen::Matrix2d rotate60; rotate60 << 0.5, -SQRT3DIV2, SQRT3DIV2, 0.5;
+	Eigen::Matrix2d rotate120; rotate120 << -0.5, -SQRT3DIV2, SQRT3DIV2, -0.5;
+	Eigen::Vector2d cen = p - c;
+	Eigen::Vector2d cen60 = rotate60*(p - c);
+	Eigen::Vector2d cen120 = rotate120*(p - c);
+	float dist1 = cen.x()*cen.x();
+	float dist2 = cen60.x()*cen60.x();
+	float dist3 = cen120.x()*cen120.x();
+	return 1.0 - std::max(std::max(dist1, dist2), dist3);
+}
+
+Eigen::Vector3d triangleCoordinates(Eigen::Vector2d UV)
+{
+	Eigen::Vector3d t;
+	Eigen::Matrix2d rotate60; rotate60 << 0.5, -SQRT3DIV2, SQRT3DIV2, 0.5;
+	Eigen::Matrix2d rotate30; rotate30 << SQRT3DIV2, -0.5, 0.5, SQRT3DIV2;
+	t.x() = UV.y();
+	t.y() = (rotate30 * UV).x();
+	t.z() = (rotate60 * UV).y();
+	return t;
 }
 
 int main(int argc, char **argv)
@@ -129,10 +269,6 @@ int main(int argc, char **argv)
 	TandBFunctionType bft1;
 	bft1.blendingFunction = [&] (double u, double v)
 	{
-		return std::min(std::min(u - std::floor(u), std::ceil(u) - u), std::min(v - std::floor(v), std::ceil(v) - v));
-	};
-	bft1.blendingFunction = [&] (double u, double v)
-	{
 		float sinU = std::sin(u*M_PI);
 		float sinV = std::sin(v*M_PI);
 		return sqrt(sinU*sinU * sinV*sinV);
@@ -154,12 +290,6 @@ int main(int argc, char **argv)
 	{
 		u += 0.5;
 		v += 0.5;
-		return std::min(std::min(u - std::floor(u), std::ceil(u) - u), std::min(v - std::floor(v), std::ceil(v) - v));
-	};
-	bft2.blendingFunction = [&] (double u, double v)
-	{
-		u += 0.5f;
-		v += 0.5f;
 		float sinU = std::sin(u*M_PI);
 		float sinV = std::sin(v*M_PI);
 		return sqrt(sinU*sinU * sinV*sinV);
@@ -167,14 +297,218 @@ int main(int argc, char **argv)
 	bft2.tilingFunction = [&] (double u, double v)
 	{
 		Eigen::Vector2i vec;
-		vec[0] = int(u + 0.5)*127;
-		vec[1] = int(v + 0.5)*127;
+		vec[0] = int(floor(u + 0.5)*127);
+		vec[1] = int(floor(v + 0.5)*127);
 		return vec;
 	};
+
 	ImageGrayd bft2Blending = bft2.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bft2Transition = bft2.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	IO::save01_in_u8(bft2Blending, std::string("/home/nlutz/bft2Blending.png"));
 	IO::save01_in_u8(bft2Transition, std::string("/home/nlutz/bft2Transition.png"));
+
+	TandBFunctionType bftTri;
+	bftTri.blendingFunction = [&] (double u, double v)
+	{
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		Eigen::Vector3d t = fract(triangleCoordinates(UV));
+		Eigen::Vector3d tmix = (t - Eigen::Vector3d(0.5, 0.5, 0.5))*2.0;
+		tmix.x() = 1.0 - std::pow(tmix.x(), 2.0);
+		tmix.y() = 1.0 - std::pow(tmix.y(), 2.0);
+		tmix.z() = 1.0 - std::pow(tmix.z(), 2.0);
+		return std::min(std::min(tmix.x(), tmix.y()), tmix.z());
+	};
+	bftTri.tilingFunction = [&] (double u, double v)
+	{
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		Eigen::Vector3d t = floor(triangleCoordinates(UV));
+		Eigen::Vector2d txy;
+		txy.x() = t.x();
+		txy.y() = t.y();
+		return Eigen::Vector2i(TilingAndBlending<ImageType>::cantorPairingFunction(txy.cast<int>()), t.z());
+	};
+
+	ImageGrayd bftTriBlending = bftTri.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bftTriTransition = bftTri.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	IO::save01_in_u8(bftTriBlending, std::string("/home/nlutz/bftTriBlending.png"));
+	IO::save01_in_u8(bftTriTransition, std::string("/home/nlutz/bftTriTransition.png"));
+
+	TandBFunctionType bftAltTri;
+	bftAltTri.blendingFunction = [&] (double u, double v)
+	{
+		u += 0.5;
+		v += 0.5;
+		Eigen::Vector2d UV;
+		UV[0] = u / SQRT3DIV2;
+		UV[1] = v; //+0.5
+		Eigen::Vector3d t = fract(triangleCoordinates(UV));
+		Eigen::Vector3d tmix = (t - Eigen::Vector3d(0.5, 0.5, 0.5))*2.0;
+		tmix.x() = 1.0 - std::pow(tmix.x(), 2.0);
+		tmix.y() = 1.0 - std::pow(tmix.y(), 2.0);
+		tmix.z() = 1.0 - std::pow(tmix.z(), 2.0);
+		return std::min(std::min(tmix.x(), tmix.y()), tmix.z());
+	};
+	bftAltTri.tilingFunction = [&] (double u, double v)
+	{
+		u += 0.5;
+		v += 0.5;
+		Eigen::Vector2d UV;
+		UV[0] = u / SQRT3DIV2;
+		UV[1] = v; //+0.5
+		Eigen::Vector3d t = floor(triangleCoordinates(UV));
+		Eigen::Vector2d txy;
+		txy.x() = t.x();
+		txy.y() = t.y();
+		return Eigen::Vector2i(TilingAndBlending<ImageType>::cantorPairingFunction(txy.cast<int>()), t.z());
+	};
+
+	ImageGrayd bftAltTriBlending = bftAltTri.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bftAltTriTransition = bftAltTri.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	IO::save01_in_u8(bftAltTriBlending, std::string("/home/nlutz/bftAltTriBlending.png"));
+	IO::save01_in_u8(bftAltTriTransition, std::string("/home/nlutz/bftAltTriTransition.png"));
+
+	TandBFunctionType bftHex;
+	bftHex.blendingFunction = [&] (double u, double v)
+	{
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		UV *= SQRT3;
+		Eigen::Vector2i H = hexagonGetID(UV);
+		return hexagonDistanceFromEdge(H, UV);
+	};
+	bftHex.tilingFunction = [&] (double u, double v)
+	{
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		UV *= SQRT3;
+		Eigen::Vector2i H = hexagonGetID(UV);
+		return H;
+	};
+
+	ImageGrayd bftHexBlending = bftHex.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bftHexTransition = bftHex.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	IO::save01_in_u8(bftHexBlending, std::string("/home/nlutz/bftHexBlending.png"));
+	IO::save01_in_u8(bftHexTransition, std::string("/home/nlutz/bftHexTransition.png"));
+
+	TandBFunctionType bftAlteratingSquares;
+	bftAlteratingSquares.blendingFunction = [&] (double u, double v) -> float
+	{
+		int vInt = std::floor(v);
+		if(vInt%2 == 1)
+		{
+			u += 0.5;
+		}
+		float sinU = std::sin(u*M_PI);
+		float sinV = std::sin(v*M_PI);
+		return sqrt(sinU*sinU * sinV*sinV);
+	};
+	bftAlteratingSquares.tilingFunction = [&] (double u, double v)
+	{
+		int vInt = std::floor(v);
+		if(vInt%2 == 1)
+		{
+			u += 0.5;
+		}
+		Eigen::Vector2i vec;
+		vec[0] = int(floor(u)*127);
+		vec[1] = int(floor(v)*127);
+		return vec;
+	};
+
+	ImageGrayd bftAltSquaresBlending = bftAlteratingSquares.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bftAltSquaresTransition = bftAlteratingSquares.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	IO::save01_in_u8(bftAltSquaresBlending, std::string("/home/nlutz/bftAltSquaresBlending.png"));
+	IO::save01_in_u8(bftAltSquaresTransition, std::string("/home/nlutz/bftAltSquaresTransition.png"));
+
+	TandBFunctionType bftRotSquare;
+	bftRotSquare.blendingFunction = [&] (double u, double v) -> float
+	{
+		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
+		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
+		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		UV[0] += 0.25;
+		UV[1] += 0.25;
+		UV = rotate45 * scaleSqrt2 * UV;
+		UV[0] += 0.0;
+		UV[1] += 0.0;
+		float sinU = std::sin(UV[0]*M_PI);
+		float sinV = std::sin(UV[1]*M_PI);
+		return sqrt(sinU*sinU * sinV*sinV);
+	};
+	bftRotSquare.tilingFunction = [&] (double u, double v)
+	{
+		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
+		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
+		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		UV[0] += 0.25;
+		UV[1] += 0.25;
+		UV = rotate45 * scaleSqrt2 * UV;
+		UV[0] += 0.0;
+		UV[1] += 0.0;
+		Eigen::Vector2i vec;
+		vec[0] = int(UV[0]+10)*63;
+		vec[1] = int(UV[1]+10)*63;
+		return vec;
+	};
+
+	ImageGrayd bftRotSquareBlending = bftRotSquare.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bftRotSquareTransition = bftRotSquare.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	IO::save01_in_u8(bftRotSquareBlending, std::string("/home/nlutz/bftRotSquareBlending.png"));
+	IO::save01_in_u8(bftRotSquareTransition, std::string("/home/nlutz/bftRotSquareTransition.png"));
+
+	TandBFunctionType bftAltRotSquare;
+	bftAltRotSquare.blendingFunction = [&] (double u, double v) -> float
+	{
+		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
+		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
+		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		UV[0] += 0.25;
+		UV[1] += 0.25;
+		UV = rotate45 * scaleSqrt2 * UV;
+		UV[0] += 0.5;
+		UV[1] += 0.5;
+		float sinU = std::sin(UV[0]*M_PI);
+		float sinV = std::sin(UV[1]*M_PI);
+		return sqrt(sinU*sinU * sinV*sinV);
+	};
+	bftAltRotSquare.tilingFunction = [&] (double u, double v)
+	{
+		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
+		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
+		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
+		Eigen::Vector2d UV;
+		UV[0] = u;
+		UV[1] = v;
+		UV[0] += 0.25;
+		UV[1] += 0.25;
+		UV = rotate45 * scaleSqrt2 * UV;
+		UV[0] += 0.5;
+		UV[1] += 0.5;
+		Eigen::Vector2i vec;
+		vec[0] = int(UV[0]+100)*256;
+		vec[1] = int(UV[1]+100)*256;
+		return vec;
+	};
+
+	ImageGrayd bftAltRotSquareBlending = bftAltRotSquare.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bftAltRotSquareTransition = bftAltRotSquare.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	IO::save01_in_u8(bftAltRotSquareBlending, std::string("/home/nlutz/bftAltRotSquareBlending.png"));
+	IO::save01_in_u8(bftAltRotSquareTransition, std::string("/home/nlutz/bftAltRotSquareTransition.png"));
 
 	TandBFunctionType::BlendingFunctionType blendingSingularityFunction = [&] (double u, double v) -> double
 	{
@@ -229,22 +563,52 @@ int main(int argc, char **argv)
 //		return vec;
 //	};
 
-	std::string name_file = IO::remove_path(argv[2]);
-	std::string name_noext = IO::remove_ext(name_file);
+	std::string filename_cycles = std::string(argv[2]);
+	std::string name_exemplar = IO::remove_path(argv[3]);
+	std::string name_noext = IO::remove_ext(name_exemplar);
 	ImageType im_out;
 	TilingAndBlending<ImageType> perioBlend;
-	for(int i=2; i<argc; ++i)
+	for(int i=3; i<argc; ++i)
 	{
 		ImageType im_in, im_out;
 		IO::loadu8_in_01(im_in, argv[i]);
 		perioBlend.addTexture(im_in);
 	}
 
-	perioBlend.addFunction(bft1);
-	perioBlend.addFunction(bft2);
-	perioBlend.setSingularityBlendingFunction(blendingSingularityFunction);
-	unsigned int outputWidth = 2048;
-	unsigned int outputHeight = 1024;
+	CycleMapType loadedCycles = loadCycles(filename_cycles);
+	std::string textureName = IO::remove_ext(IO::remove_path(name_exemplar));
+	CyclePair cyclePair;
+	CycleMapType::const_iterator cit = loadedCycles.find(textureName);
+	if(cit != loadedCycles.end())
+		cyclePair = (*cit).second;
+
+	switch (arguments.tiling)
+	{
+	case SQUARE_SQUARE:
+		perioBlend.addFunction(bft1);
+		perioBlend.addFunction(bft2);
+		break;
+	case ALTSQUARE_TRIANGULAR:
+		perioBlend.addFunction(bftAlteratingSquares);
+		perioBlend.addFunction(bftAltTri);
+		break;
+	case ROTSQUARE_ROTSQUARE:
+		perioBlend.addFunction(bftRotSquare);
+		perioBlend.addFunction(bftAltRotSquare);
+		break;
+	case HEXAGONAL_TRIANGULAR:
+		perioBlend.addFunction(bftTri);
+		perioBlend.addFunction(bftHex);
+		break;
+	}
+
+
+	if(arguments.useSingularityHider)
+	{
+		perioBlend.setSingularityBlendingFunction(blendingSingularityFunction);
+	}
+	unsigned int outputWidth = arguments.width;
+	unsigned int outputHeight = arguments.height;
 	perioBlend.setWidth(arguments.width);
 	perioBlend.setHeight(arguments.height);
 	perioBlend.setUVScale(arguments.uScale, arguments.vScale);
@@ -253,6 +617,10 @@ int main(int argc, char **argv)
 
 	ImageGrayd bftSumBlending = perioBlend.visualizeBlendingSum(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	IO::save01_in_u8(bftSumBlending, std::string("/home/nlutz/bftSumBlending.png"));
+
+	perioBlend.setCSCycles(cyclePair.vectors[0], cyclePair.vectors[1]);
+	perioBlend.setCSPolyphaseComponentSamplesNumber(Eigen::Vector2i(1, 1));
+
 	im_out = perioBlend.synthesize_stationary();
 	ImageRGBd im_visualizeSynthesis = perioBlend.visualizeSynthesis(outputWidth, outputHeight);
 
@@ -274,15 +642,22 @@ int main(int argc, char **argv)
 			pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
 	});
 
-	IO::save01_in_u8(im_out, std::string("/home/nlutz/") + name_noext + "_"
-					 + std::to_string(arguments.width) + "x"
-					 + std::to_string(arguments.height) +  "_uScale="
-					 + std::to_string(arguments.uScale) + "_vScale="
-					 + std::to_string(arguments.vScale) + (arguments.useHistogramTransfer ? "_HT_" : "_noHT_")
-					 + (arguments.isotropy == NO_ISOTROPY ? "noIso" :
-						(arguments.isotropy == FULL_ISOTROPY ? "fullIso" :
-						(arguments.isotropy == PI_ISOTROPY ? "piIso" :
-						(arguments.isotropy == HALF_PI_ISOTROPY ? "halfPiIso" : "unspecifiedIso")))) + ".png");
-	IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_out.png"));
+	std::string suffix = name_noext + "_"
+			+ std::to_string(arguments.width) + "x"
+			+ std::to_string(arguments.height) +  "_uScale="
+			+ std::to_string(arguments.uScale) + "_vScale="
+			+ std::to_string(arguments.vScale) + (arguments.useHistogramTransfer ? "_HT_" : "_noHT_")
+			+ (arguments.isotropy == NO_ISOTROPY ? "noIso" :
+			   (arguments.isotropy == FULL_ISOTROPY ? "fullIso" :
+			   (arguments.isotropy == PI_ISOTROPY ? "piIso" :
+			   (arguments.isotropy == HALF_PI_ISOTROPY ? "halfPiIso" : "unspecIso"))))
+			+ (arguments.tiling == SQUARE_SQUARE ? "_SqSq" :
+				(arguments.tiling == ALTSQUARE_TRIANGULAR ? "_ASqTr" :
+				(arguments.tiling == ROTSQUARE_ROTSQUARE ? "_rotSqSq" :
+				(arguments.tiling == HEXAGONAL_TRIANGULAR ? "_hexTri" : "_unspecTiling"))))
+			+ (arguments.useSingularityHider ? "_SH" : "_noSH") + ".png";
+	IO::save01_in_u8(im_out, std::string("/home/nlutz/") + suffix);
+	IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_") + suffix);
+	IO::save01_in_u8(perioBlend.visualizePrimalAndDual(), std::string("/home/nlutz/blending_") + suffix);
 	return 0;
 }

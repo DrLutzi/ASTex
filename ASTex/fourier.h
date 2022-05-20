@@ -351,7 +351,9 @@ double ASTEX_API stationaryMean(const ImageGrayd& input);
 
 double ASTEX_API stationaryVariance(const ImageGrayd& input);
 
-bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool correlation=false);
+bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool correlation=false, bool logScale=false);
+
+bool secondCenteredMomentOfOrder(const ImageGrayd& input, ImageGrayd& autocorrelation, bool correlation=false);
 
 /**
  * \class spectrum_projector_2D fourier.h

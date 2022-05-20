@@ -1261,7 +1261,7 @@ double stationaryVariance(const ImageGrayd& input)
 	return v;
 }
 
-bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool computeCorrelation)
+bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool computeCorrelation, bool logScale)
 {
 	const int im_w = input.width();
 	const int im_h = input.height();
@@ -1292,6 +1292,10 @@ bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& a
 				P = v;
 			if(computeCorrelation)
 				P/=v;
+			if(logScale)
+			{
+				P=std::abs(P)/(0.1+std::abs(P));
+			}
 		});
 	}
 

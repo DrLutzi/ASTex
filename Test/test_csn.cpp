@@ -177,7 +177,7 @@ int main(int argc, char **argv)
 
 	auto spotNoiseProcedure = [&] (const PcaImageType &image) -> PcaImageType
 	{
-		float spotNoiseOutputScale = 4.0;
+		float spotNoiseOutputScale = 1.0;
 		PcaImageType centeredImage;
 		centeredImage.initItk(image.width(), image.height());
 		centeredImage.copy_pixels(image);
@@ -269,7 +269,7 @@ int main(int argc, char **argv)
 		{
 			srand(0);
 			Stamping::SamplerCycles sampler;
-			sampler.setNbPoints(8600);
+			sampler.setNbPoints(400);
 			sampler.setCycles(cyclePair.vectors[0].cast<float>()/spotNoiseOutputScale, cyclePair.vectors[1].cast<float>()/spotNoiseOutputScale);
 			Stamping::StamperTexton<PcaImageType> stamper(&sampler, &stamp);
 			stamper.setPeriodicity(true);

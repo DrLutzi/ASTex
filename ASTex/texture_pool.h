@@ -194,7 +194,8 @@ void TexturePool<I, MASK_TYPE>::generate()
 						//if the tile is non periodic, and lose information if the tile is periodic.
 						//I put a factor of 1.6 for the size of the tile because
 						//it can encompasse a pi/2-rotated image with a small upscaling on top of it.
-						shiftedTile.initItk(1.6*selectedTexture.width(), 1.6*selectedTexture.height(), true);
+						//Years later I re-read the comment and found that I needed it to be 1.0 instead
+						shiftedTile.initItk(1.0*selectedTexture.width(), 1.0*selectedTexture.height(), true);
 						shiftedTile.for_all_pixels([&] (PixelType &pix, int x, int y)
 						{
 							v[0]=x;

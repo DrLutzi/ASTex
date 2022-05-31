@@ -76,8 +76,13 @@ typedef struct
 	Isotropy_enum_t isotropy;
 	double uScale;
 	double vScale;
+	double uTranslation;
+	double vTranslation;
 	bool useSingularityHider;
 	Tiling_enum_t tiling;
+	bool isCyclostationary;
+	bool useImportanceSampling;
+	bool useAutocovarianceSampling;
 } ArgumentsType;
 
 ArgumentsType loadArguments(std::string argFilename)
@@ -136,6 +141,26 @@ ArgumentsType loadArguments(std::string argFilename)
 				else if(key == "tiling")
 				{
 					arguments.tiling = Tiling_enum_t(std::stoi(value));
+				}
+				else if(key == "uTranslation")
+				{
+					arguments.uTranslation = std::stod(value);
+				}
+				else if(key == "vTranslation")
+				{
+					arguments.vTranslation = std::stod(value);
+				}
+				else if(key == "isCyclostationary")
+				{
+					arguments.isCyclostationary = bool(std::stoi(value));
+				}
+				else if(key == "useImportanceSampling")
+				{
+					arguments.useImportanceSampling = bool(std::stoi(value));
+				}
+				else if(key == "useAutocovarianceSampling")
+				{
+					arguments.useAutocovarianceSampling = bool(std::stoi(value));
 				}
 			}
 		}
@@ -269,12 +294,16 @@ int main(int argc, char **argv)
 	TandBFunctionType bft1;
 	bft1.blendingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		float sinU = std::sin(u*M_PI);
 		float sinV = std::sin(v*M_PI);
 		return sqrt(sinU*sinU * sinV*sinV);
 	};
 	bft1.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Vector2i vec;
 		vec[0] = int(u)*63;
 		vec[1] = int(v)*63;
@@ -288,6 +317,8 @@ int main(int argc, char **argv)
 	TandBFunctionType bft2;
 	bft2.blendingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		u += 0.5;
 		v += 0.5;
 		float sinU = std::sin(u*M_PI);
@@ -296,6 +327,8 @@ int main(int argc, char **argv)
 	};
 	bft2.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Vector2i vec;
 		vec[0] = int(floor(u + 0.5)*127);
 		vec[1] = int(floor(v + 0.5)*127);
@@ -310,6 +343,8 @@ int main(int argc, char **argv)
 	TandBFunctionType bftTri;
 	bftTri.blendingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
@@ -322,6 +357,8 @@ int main(int argc, char **argv)
 	};
 	bftTri.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
@@ -340,6 +377,8 @@ int main(int argc, char **argv)
 	TandBFunctionType bftAltTri;
 	bftAltTri.blendingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		u += 0.5;
 		v += 0.5;
 		Eigen::Vector2d UV;
@@ -354,6 +393,8 @@ int main(int argc, char **argv)
 	};
 	bftAltTri.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		u += 0.5;
 		v += 0.5;
 		Eigen::Vector2d UV;
@@ -374,6 +415,8 @@ int main(int argc, char **argv)
 	TandBFunctionType bftHex;
 	bftHex.blendingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
@@ -383,6 +426,8 @@ int main(int argc, char **argv)
 	};
 	bftHex.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
@@ -399,6 +444,8 @@ int main(int argc, char **argv)
 	TandBFunctionType bftAlteratingSquares;
 	bftAlteratingSquares.blendingFunction = [&] (double u, double v) -> float
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		int vInt = std::floor(v);
 		if(vInt%2 == 1)
 		{
@@ -410,6 +457,8 @@ int main(int argc, char **argv)
 	};
 	bftAlteratingSquares.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		int vInt = std::floor(v);
 		if(vInt%2 == 1)
 		{
@@ -429,14 +478,16 @@ int main(int argc, char **argv)
 	TandBFunctionType bftRotSquare;
 	bftRotSquare.blendingFunction = [&] (double u, double v) -> float
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
 		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
 		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
-		UV[0] += 0.25;
-		UV[1] += 0.25;
+//		UV[0] += 0.25;
+//		UV[1] += 0.25;
 		UV = rotate45 * scaleSqrt2 * UV;
 		UV[0] += 0.0;
 		UV[1] += 0.0;
@@ -446,14 +497,16 @@ int main(int argc, char **argv)
 	};
 	bftRotSquare.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
 		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
 		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
-		UV[0] += 0.25;
-		UV[1] += 0.25;
+//		UV[0] += 0.25;
+//		UV[1] += 0.25;
 		UV = rotate45 * scaleSqrt2 * UV;
 		UV[0] += 0.0;
 		UV[1] += 0.0;
@@ -471,14 +524,16 @@ int main(int argc, char **argv)
 	TandBFunctionType bftAltRotSquare;
 	bftAltRotSquare.blendingFunction = [&] (double u, double v) -> float
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
 		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
 		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
-		UV[0] += 0.25;
-		UV[1] += 0.25;
+//		UV[0] += 0.25;
+//		UV[1] += 0.25;
 		UV = rotate45 * scaleSqrt2 * UV;
 		UV[0] += 0.5;
 		UV[1] += 0.5;
@@ -488,14 +543,16 @@ int main(int argc, char **argv)
 	};
 	bftAltRotSquare.tilingFunction = [&] (double u, double v)
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		Eigen::Matrix2d rotate45; rotate45 << SQRT2DIV2, -SQRT2DIV2, SQRT2DIV2, SQRT2DIV2;
 		//Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << 1.0, 0, 0, 1.0;
 		Eigen::Matrix2d scaleSqrt2; scaleSqrt2 << sqrt(2.0), 0, 0, sqrt(2);
 		Eigen::Vector2d UV;
 		UV[0] = u;
 		UV[1] = v;
-		UV[0] += 0.25;
-		UV[1] += 0.25;
+//		UV[0] += 0.25;
+//		UV[1] += 0.25;
 		UV = rotate45 * scaleSqrt2 * UV;
 		UV[0] += 0.5;
 		UV[1] += 0.5;
@@ -512,6 +569,8 @@ int main(int argc, char **argv)
 
 	TandBFunctionType::BlendingFunctionType blendingSingularityFunction = [&] (double u, double v) -> double
 	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
 		u -= 0.5f;
 		v -= 0.5f;
 		u*=1.41421356237;
@@ -621,7 +680,11 @@ int main(int argc, char **argv)
 	perioBlend.setCSCycles(cyclePair.vectors[0], cyclePair.vectors[1]);
 	perioBlend.setCSPolyphaseComponentSamplesNumber(Eigen::Vector2i(1, 1));
 
-	im_out = perioBlend.synthesize_stationary();
+	if(arguments.isCyclostationary)
+		im_out = perioBlend.synthesize_cyclostationary();
+	else
+		im_out = perioBlend.synthesize_stationary();
+
 	ImageRGBd im_visualizeSynthesis = perioBlend.visualizeSynthesis(outputWidth, outputHeight);
 
 	ImageGrayd bft1BlendingNormalized = divideBySum(bft1Blending, bftSumBlending);
@@ -655,7 +718,10 @@ int main(int argc, char **argv)
 				(arguments.tiling == ALTSQUARE_TRIANGULAR ? "_ASqTr" :
 				(arguments.tiling == ROTSQUARE_ROTSQUARE ? "_rotSqSq" :
 				(arguments.tiling == HEXAGONAL_TRIANGULAR ? "_hexTri" : "_unspecTiling"))))
-			+ (arguments.useSingularityHider ? "_SH" : "_noSH") + ".png";
+			+ (arguments.useSingularityHider ? "_SH" : "_noSH")
+			+ "_uTr=" + std::to_string(arguments.uTranslation)
+			+ "_vTr=" + std::to_string(arguments.vTranslation)
+			+ (arguments.useAutocovarianceSampling ? "_ACSampling" : "") + ".png";
 	IO::save01_in_u8(im_out, std::string("/home/nlutz/") + suffix);
 	IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_") + suffix);
 	IO::save01_in_u8(perioBlend.visualizePrimalAndDual(), std::string("/home/nlutz/blending_") + suffix);

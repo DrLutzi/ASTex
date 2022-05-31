@@ -12,6 +12,7 @@
 #include "ASTex/texture_pool.h"
 #include "ASTex/CSN/csn_texture.h"
 #include "ASTex/Perioblend/affineTransformations.h"
+#include "ASTex/Stamping/sampler.h"
 
 namespace ASTex
 {
@@ -217,14 +218,17 @@ public:
 	 */
 	ImageType synthesize_cyclostationary();
 
+	//Importance sampling DLC
+	void setImportanceSampler(Stamping::SamplerImportance *sampler);
+
 
 private:
 
 	Vec2 fract(Vec2 v) const;
 
 	Vec2 hash(const Vec2 &p) const;
-
 	Vec2 cyclicHash(Vec2 p) const;
+	Vec2 importanceHash(const Vec2 &p) const;
 
 	TexturePool<ImageType>	m_texturePool;
 	std::list<TandBFunctionType> m_functions;
@@ -245,6 +249,9 @@ private:
 	PtrImageType			m_transferPtrImage;
 	PtrImageType			m_pcaPtrImage;
 	unsigned				m_largestCycleProduct;
+
+	//Importance sampling DLC
+	Stamping::SamplerImportance *m_sampler;
 };
 
 template<typename I>
@@ -258,7 +265,8 @@ TilingAndBlending<I>::TilingAndBlending() :
 	m_uScale(1.0),
 	m_vScale(1.0),
 	m_useTransfer(true),
-	m_randomAffineTransform()
+	m_randomAffineTransform(),
+	m_sampler(nullptr)
 {}
 
 template<typename I>
@@ -330,7 +338,11 @@ typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_statio
 		for(auto const &fonctions : m_functions)
 		{
 			Eigen::Vector2i tile = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
-			Vec2 uvTexture = hash(tile.cast<double>());
+			Vec2 uvTexture;
+			if(m_sampler != nullptr)
+				uvTexture = hash(tile.cast<double>());
+			else
+				uvTexture = importanceHash(tile.cast<double>());
 			uvTexture[0] += u;
 			uvTexture[1] += v;
 			AffineTransform affT = m_randomAffineTransform.generate(true, cantorPairingFunction(tile));
@@ -973,6 +985,16 @@ typename TilingAndBlending<I>::Vec2 TilingAndBlending<I>::cyclicHash(Vec2 p) con
 	int cycle1 = int(h[0]*randMax);
 	int cycle2 = int(h[1]*randMax);
 	return double(cycle1)*m_cs_t0 + double(cycle2)*m_cs_t1;
+}
+
+template<typename I>
+typename TilingAndBlending<I>::Vec2 TilingAndBlending<I>::importanceHash(const Vec2 &p) const
+{
+	assert(m_sampler && "importanceHash: no sampler is set.");
+	const ImageType &texture = m_texturePool[0].texture;
+	srand(int(p[1]*(1<<14)*texture.width()) + int(p[0]*(1<<14)));
+	Eigen::Vector2f pf = m_sampler->next();
+	return Eigen::Vector2d(double(pf[0]), double(pf[1]));
 }
 
 }

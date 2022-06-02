@@ -339,7 +339,7 @@ typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_statio
 		{
 			Eigen::Vector2i tile = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
 			Vec2 uvTexture;
-			if(m_sampler != nullptr)
+			if(m_sampler == nullptr)
 				uvTexture = hash(tile.cast<double>());
 			else
 				uvTexture = importanceHash(tile.cast<double>());
@@ -961,6 +961,12 @@ typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_cyclos
 	});
 	ImageType output =  CSN::CSN_Texture<ImageType>::fromPcaImageType(pcaTexture);
 	return output;
+}
+
+template<typename I>
+void TilingAndBlending<I>::setImportanceSampler(Stamping::SamplerImportance *sampler)
+{
+	m_sampler = sampler;
 }
 
 template<typename I>

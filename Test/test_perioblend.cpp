@@ -1,6 +1,14 @@
 #include <stdlib.h>
 #include <ASTex/Perioblend/perioblend.h>
 #include <ASTex/easy_io.h>
+#include <ASTex/fourier.h>
+#include <ASTex/utils.h>
+#include <ASTex/rpn_utils.h>
+#include "itkImage.h"
+#include "itkScaleTransform.h"
+#include "itkResampleImageFilter.h"
+#include "itkImageFileReader.h"
+#include "itkImageFileWriter.h"
 
 #define SQRT3DIV2 0.86602540378
 #define SQRT3 1.73205080757
@@ -70,19 +78,22 @@ typedef enum {SQUARE_SQUARE=0, ALTSQUARE_TRIANGULAR=1, ROTSQUARE_ROTSQUARE=2, HE
 
 typedef struct
 {
-	bool useHistogramTransfer;
-	unsigned int width;
-	unsigned int height;
-	Isotropy_enum_t isotropy;
-	double uScale;
-	double vScale;
-	double uTranslation;
-	double vTranslation;
-	bool useSingularityHider;
-	Tiling_enum_t tiling;
-	bool isCyclostationary;
-	bool useImportanceSampling;
-	bool useAutocovarianceSampling;
+	bool useHistogramTransfer;			//if a histogram transfer should be used
+	unsigned int width;					//output width
+	unsigned int height;				//output height
+	Isotropy_enum_t isotropy;			//type of affine invariance (used to be isotropy only)
+	double uScale;						//scale in u (only for synthesis structures)
+	double vScale;						//scale in v (only for synthesis structures)
+	double uTranslation;				//translation in u (only for synthesis structures)
+	double vTranslation;				//translation in v (only for synthesis structures)
+	bool useSingularityHider;			//if a singularity hider should be used, but it's only implemented for SqSq tiles
+	Tiling_enum_t tiling;				//the type of primal/dual
+	bool isCyclostationary;				//if the process must be assumed to be cyclostationary (in which case periods will be seeked)
+	bool useImportanceSampling;			//(UNUSED) if importance sampling should be used
+	bool useAutocovarianceSampling;		//if importance sampling with the AC fonction should be used
+	bool compareAutocovariance;			//if the autocovariance of the output must be compared to that of the exemplar
+	bool cheatAutocovariance;			//if the autocovariance function should be inverted in the importance sampler to force some of the worst possible outputs
+	bool tryToUseMask;					//if a mask should be loaded if possible (mask image should be texture_mask.png in the same directory)
 } ArgumentsType;
 
 ArgumentsType loadArguments(std::string argFilename)
@@ -161,6 +172,18 @@ ArgumentsType loadArguments(std::string argFilename)
 				else if(key == "useAutocovarianceSampling")
 				{
 					arguments.useAutocovarianceSampling = bool(std::stoi(value));
+				}
+				else if(key == "compareAutocovariance")
+				{
+					arguments.compareAutocovariance = bool(std::stoi(value));
+				}
+				else if(key == "cheatAutocovariance")
+				{
+					arguments.cheatAutocovariance = bool(std::stoi(value));
+				}
+				else if(key == "tryToUseMask")
+				{
+					arguments.tryToUseMask = bool(std::stoi(value));
 				}
 			}
 		}
@@ -625,6 +648,25 @@ int main(int argc, char **argv)
 	std::string filename_cycles = std::string(argv[2]);
 	std::string name_exemplar = IO::remove_path(argv[3]);
 	std::string name_noext = IO::remove_ext(name_exemplar);
+	std::string suffix = name_noext + "_"
+			+ std::to_string(arguments.width) + "x"
+			+ std::to_string(arguments.height) +  "_uScale="
+			+ std::to_string(arguments.uScale) + "_vScale="
+			+ std::to_string(arguments.vScale) + (arguments.useHistogramTransfer ? "_HT_" : "_noHT_")
+			+ (arguments.isotropy == NO_ISOTROPY ? "noIso" :
+			   (arguments.isotropy == FULL_ISOTROPY ? "fullIso" :
+			   (arguments.isotropy == PI_ISOTROPY ? "piIso" :
+			   (arguments.isotropy == HALF_PI_ISOTROPY ? "halfPiIso" : "unspecIso"))))
+			+ (arguments.tiling == SQUARE_SQUARE ? "_SqSq" :
+				(arguments.tiling == ALTSQUARE_TRIANGULAR ? "_ASqTr" :
+				(arguments.tiling == ROTSQUARE_ROTSQUARE ? "_rotSqSq" :
+				(arguments.tiling == HEXAGONAL_TRIANGULAR ? "_hexTri" : "_unspecTiling"))))
+			+ (arguments.useSingularityHider ? "_SH" : "_noSH")
+			+ "_uTr=" + std::to_string(arguments.uTranslation)
+			+ "_vTr=" + std::to_string(arguments.vTranslation)
+			+ (arguments.useAutocovarianceSampling ? "_ACSampling" : "")
+			+ (arguments.cheatAutocovariance ? "_cheatedAC" : "")
+			+".png";
 	ImageType im_out;
 	TilingAndBlending<ImageType> perioBlend;
 	for(int i=3; i<argc; ++i)
@@ -680,10 +722,118 @@ int main(int argc, char **argv)
 	perioBlend.setCSCycles(cyclePair.vectors[0], cyclePair.vectors[1]);
 	perioBlend.setCSPolyphaseComponentSamplesNumber(Eigen::Vector2i(1, 1));
 
+	ImageGrayd r, g, b, autocorrelation;
 	if(arguments.isCyclostationary)
 		im_out = perioBlend.synthesize_cyclostationary();
 	else
-		im_out = perioBlend.synthesize_stationary();
+	{
+		if(arguments.useAutocovarianceSampling || arguments.compareAutocovariance)
+		{
+			ImageType im_in;
+			IO::loadu8_in_01(im_in, argv[3]);
+			if(im_in.width()>512 || im_in.height()>512)
+			{ //I just want to scale an exemplar, why does it take like a million lines with itk
+				ImageType::ItkImg::SizeType inputSize  = im_in.itk()->GetLargestPossibleRegion().GetSize();
+				ImageType::ItkImg::SizeType outputSize;
+				outputSize[0] = std::min(512, im_in.width());
+				outputSize[1] = std::min(512, im_in.height());
+				using TransformType = itk::IdentityTransform <double, 2>;
+				using ResampleImageFilterType = itk::ResampleImageFilter<ImageType::ItkImg, ImageType::ItkImg>;
+
+				ImageType::ItkImg::SpacingType outputSpacing;
+				outputSpacing[0] = im_in.itk()->GetSpacing()[0] * (double(inputSize[0]) / double(outputSize[0]));
+				outputSpacing[1] = im_in.itk()->GetSpacing()[1] * (double(inputSize[1]) / double(outputSize[1]));
+
+				ResampleImageFilterType::Pointer resample = ResampleImageFilterType::New();
+				resample->SetInput(im_in.itk());
+				resample->SetSize(outputSize);
+				resample->SetOutputSpacing(outputSpacing);
+				resample->SetTransform(TransformType::New());
+				resample->UpdateOutputInformation();
+				resample->Update();
+				im_in.itk() = resample->GetOutput();
+			}
+			IO::save01_in_u8(im_in, "/home/nlutz/scaled.png");
+			extract3Channels(im_in, r, g, b);
+			Fourier::truePeriodicStationaryAutocovariance(r, autocorrelation, true, false);
+			autocorrelation.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+			{
+				if(arguments.cheatAutocovariance)
+				{
+					pix = pix > 0 ? 0 : -pix;
+				}
+				else
+				{
+					pix = pix < 0 ? 0 : pix;
+				}
+			});
+			IO::save01_in_u8(autocorrelation, "/home/nlutz/autocorrelation" + suffix);
+
+			if(arguments.useAutocovarianceSampling)
+			{
+				Stamping::SamplerImportance *si = new Stamping::SamplerImportance(autocorrelation);
+				perioBlend.setImportanceSampler(si);
+				im_out = perioBlend.synthesize_stationary();
+				delete si;
+				perioBlend.setImportanceSampler(nullptr);
+			}
+			else
+			{
+				im_out = perioBlend.synthesize_stationary();
+			}
+			if(arguments.compareAutocovariance)
+			{
+				if(im_out.width()>512 || im_out.height()>512)
+				{ //I just want to scale an exemplar, why does it take like a million lines with itk
+					ImageType::ItkImg::SizeType inputSize  = im_in.itk()->GetLargestPossibleRegion().GetSize();
+					ImageType::ItkImg::SizeType outputSize;
+					outputSize[0] = std::min(512, im_out.width());
+					outputSize[1] = std::min(512, im_out.height());
+					using TransformType = itk::IdentityTransform <double, 2>;
+					using ResampleImageFilterType = itk::ResampleImageFilter<ImageType::ItkImg, ImageType::ItkImg>;
+
+					ImageType::ItkImg::SpacingType outputSpacing;
+					outputSpacing[0] = im_out.itk()->GetSpacing()[0] * (double(inputSize[0]) / double(outputSize[0]));
+					outputSpacing[1] = im_out.itk()->GetSpacing()[1] * (double(inputSize[1]) / double(outputSize[1]));
+
+					ResampleImageFilterType::Pointer resample = ResampleImageFilterType::New();
+					resample->SetInput(im_out.itk());
+					resample->SetSize(outputSize);
+					resample->SetOutputSpacing(outputSpacing);
+					resample->SetTransform(TransformType::New());
+					resample->UpdateOutputInformation();
+					resample->Update();
+					im_out.itk() = resample->GetOutput();
+				}
+				ImageGrayd autocorrelation_out;
+				extract3Channels(im_out, r, g, b);
+				Fourier::truePeriodicStationaryAutocovariance(r, autocorrelation_out, true, false);
+				autocorrelation_out.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+				{
+					pix = pix < 0 ? 0 : pix;
+				});
+				IO::save01_in_u8(autocorrelation_out, "/home/nlutz/autocorrelation_out" + suffix);
+				assert(autocorrelation.width() == autocorrelation_out.width());
+				ImageGrayd norm2diff;
+				norm2diff.initItk(autocorrelation.width(), autocorrelation.height());
+				double totalDiff;
+				norm2diff.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
+				{
+					ImageGrayd::PixelType &pixACIn = autocorrelation.pixelAbsolute(x, y);
+					ImageGrayd::PixelType &pixACOut = autocorrelation_out.pixelAbsolute(x, y);
+					pix = std::sqrt((pixACIn - pixACOut) * (pixACIn - pixACOut));
+					totalDiff += pix;
+				});
+				std::cout << "autocovariance diff=" << totalDiff/(norm2diff.width()*norm2diff.height()) << std::endl;
+				IO::save01_in_u8(norm2diff, "/home/nlutz/autocorrelationNorm2Diff" + suffix);
+			}
+		}
+		else
+		{
+			im_out = perioBlend.synthesize_stationary();
+		}
+	}
+
 
 	ImageRGBd im_visualizeSynthesis = perioBlend.visualizeSynthesis(outputWidth, outputHeight);
 
@@ -705,23 +855,6 @@ int main(int argc, char **argv)
 			pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
 	});
 
-	std::string suffix = name_noext + "_"
-			+ std::to_string(arguments.width) + "x"
-			+ std::to_string(arguments.height) +  "_uScale="
-			+ std::to_string(arguments.uScale) + "_vScale="
-			+ std::to_string(arguments.vScale) + (arguments.useHistogramTransfer ? "_HT_" : "_noHT_")
-			+ (arguments.isotropy == NO_ISOTROPY ? "noIso" :
-			   (arguments.isotropy == FULL_ISOTROPY ? "fullIso" :
-			   (arguments.isotropy == PI_ISOTROPY ? "piIso" :
-			   (arguments.isotropy == HALF_PI_ISOTROPY ? "halfPiIso" : "unspecIso"))))
-			+ (arguments.tiling == SQUARE_SQUARE ? "_SqSq" :
-				(arguments.tiling == ALTSQUARE_TRIANGULAR ? "_ASqTr" :
-				(arguments.tiling == ROTSQUARE_ROTSQUARE ? "_rotSqSq" :
-				(arguments.tiling == HEXAGONAL_TRIANGULAR ? "_hexTri" : "_unspecTiling"))))
-			+ (arguments.useSingularityHider ? "_SH" : "_noSH")
-			+ "_uTr=" + std::to_string(arguments.uTranslation)
-			+ "_vTr=" + std::to_string(arguments.vTranslation)
-			+ (arguments.useAutocovarianceSampling ? "_ACSampling" : "") + ".png";
 	IO::save01_in_u8(im_out, std::string("/home/nlutz/") + suffix);
 	IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_") + suffix);
 	IO::save01_in_u8(perioBlend.visualizePrimalAndDual(), std::string("/home/nlutz/blending_") + suffix);

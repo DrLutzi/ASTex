@@ -1294,7 +1294,55 @@ bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& a
 				P/=v;
 			if(logScale)
 			{
-				P=std::abs(P)/(0.1+std::abs(P));
+				if(P>=0)
+					P=P/(0.1+P);
+			}
+		});
+	}
+
+	return autoCorrelationExists;
+}
+
+bool trueBoundedStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool computeCorrelation, bool logScale, unsigned int width, unsigned int height)
+{
+	width = width > 0 ? width : input.width();
+	height = height > 0 ? height : input.height();
+	autocorrelation.initItk(width, height);
+
+
+	double m = stationaryMean(input);
+	double v = stationaryVariance(input);
+	bool autoCorrelationExists = v>0.0005;
+
+	if(autoCorrelationExists || !computeCorrelation)
+	{
+		// compute auto-correlation
+		autocorrelation.for_all_pixels([&] (double& P, int dx, int dy)
+		{
+			unsigned int hits = 0;
+			if(dx != 0 || dy != 0)
+			{
+				double cov = 0;
+
+				input.for_all_pixels([&] (int x, int y)
+				{
+					if(x+dx < input.width() && y+dy < input.height())
+					{
+						++hits;
+						cov += (input.pixelAbsolute(x,y) - m) * (input.pixelAbsolute(x+dx, y+dy) - m);
+					}
+				});
+
+				P = cov / hits;
+			}
+			else
+				P = v;
+			if(computeCorrelation)
+				P/=v;
+			if(logScale)
+			{
+				if(P>=0)
+					P=P/(0.1+P);
 			}
 		});
 	}

@@ -74,7 +74,7 @@ CycleMapType loadCycles(std::string filename)
 }
 
 typedef enum {NO_ISOTROPY=0, FULL_ISOTROPY=1, PI_ISOTROPY=2, HALF_PI_ISOTROPY=3, UNSPECIFIED_ISOTROPY=4} Isotropy_enum_t;
-typedef enum {SQUARE_SQUARE=0, ALTSQUARE_TRIANGULAR=1, ROTSQUARE_ROTSQUARE=2, HEXAGONAL_TRIANGULAR=3} Tiling_enum_t;
+typedef enum {SQUARE_SQUARE=0, ALTSQUARE_TRIANGULAR=1, ROTSQUARE_ROTSQUARE=2, HEXAGONAL_TRIANGULAR=3, FOUR_SQUARES=4} Tiling_enum_t;
 
 typedef struct
 {
@@ -94,6 +94,10 @@ typedef struct
 	bool compareAutocovariance;			//if the autocovariance of the output must be compared to that of the exemplar
 	bool cheatAutocovariance;			//if the autocovariance function should be inverted in the importance sampler to force some of the worst possible outputs
 	bool tryToUseMask;					//if a mask should be loaded if possible (mask image should be texture_mask.png in the same directory)
+	bool useCustomImportanceMap;
+	double importanceMapCutThreshold;
+	bool computeOnlyOutputAutocovariance;
+	int contentMaskTest;
 } ArgumentsType;
 
 ArgumentsType loadArguments(std::string argFilename)
@@ -184,6 +188,22 @@ ArgumentsType loadArguments(std::string argFilename)
 				else if(key == "tryToUseMask")
 				{
 					arguments.tryToUseMask = bool(std::stoi(value));
+				}
+				else if(key == "useCustomImportanceMap")
+				{
+					arguments.useCustomImportanceMap = bool(std::stoi(value));
+				}
+				else if(key == "importanceMapCutThreshold")
+				{
+					arguments.importanceMapCutThreshold = std::stod(value);
+				}
+				else if(key == "computeOnlyOutputAutocovariance")
+				{
+					arguments.computeOnlyOutputAutocovariance = bool(std::stoi(value));
+				}
+				else if(key == "contentMaskTest")
+				{
+					arguments.contentMaskTest = std::stoi(value);
 				}
 			}
 		}
@@ -334,8 +354,8 @@ int main(int argc, char **argv)
 	};
 	ImageGrayd bft1Blending = bft1.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bft1Transition = bft1.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bft1Blending, std::string("/home/nlutz/bft1Blending.png"));
-	IO::save01_in_u8(bft1Transition, std::string("/home/nlutz/bft1Transition.png"));
+	//IO::save01_in_u8(bft1Blending, std::string("/home/nlutz/bft1Blending.png"));
+	//IO::save01_in_u8(bft1Transition, std::string("/home/nlutz/bft1Transition.png"));
 
 	TandBFunctionType bft2;
 	bft2.blendingFunction = [&] (double u, double v)
@@ -360,8 +380,58 @@ int main(int argc, char **argv)
 
 	ImageGrayd bft2Blending = bft2.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bft2Transition = bft2.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bft2Blending, std::string("/home/nlutz/bft2Blending.png"));
-	IO::save01_in_u8(bft2Transition, std::string("/home/nlutz/bft2Transition.png"));
+	//IO::save01_in_u8(bft2Blending, std::string("/home/nlutz/bft2Blending.png"));
+	//IO::save01_in_u8(bft2Transition, std::string("/home/nlutz/bft2Transition.png"));
+
+	TandBFunctionType bft3;
+	bft3.blendingFunction = [&] (double u, double v)
+	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
+		u+=0.5;
+		float sinU = std::sin(u*M_PI);
+		float sinV = std::sin(v*M_PI);
+		return sqrt(sinU*sinU * sinV*sinV);
+	};
+	bft3.tilingFunction = [&] (double u, double v)
+	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
+		u+=0.5;
+		Eigen::Vector2i vec;
+		vec[0] = int(u)*63;
+		vec[1] = int(v)*63;
+		return vec;
+	};
+	ImageGrayd bft3Blending = bft3.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bft3Transition = bft3.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	//IO::save01_in_u8(bft3Blending, std::string("/home/nlutz/bft3Blending.png"));
+	//IO::save01_in_u8(bft3Transition, std::string("/home/nlutz/bft3Transition.png"));
+
+	TandBFunctionType bft4;
+	bft4.blendingFunction = [&] (double u, double v)
+	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
+		v+=0.5;
+		float sinU = std::sin(u*M_PI);
+		float sinV = std::sin(v*M_PI);
+		return sqrt(sinU*sinU * sinV*sinV);
+	};
+	bft4.tilingFunction = [&] (double u, double v)
+	{
+		u += arguments.uTranslation;
+		v += arguments.vTranslation;
+		v+=0.5;
+		Eigen::Vector2i vec;
+		vec[0] = int(u)*63;
+		vec[1] = int(v)*63;
+		return vec;
+	};
+	ImageGrayd bft4Blending = bft4.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	ImageRGBd bft4Transition = bft4.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
+	//IO::save01_in_u8(bft4Blending, std::string("/home/nlutz/bft4Blending.png"));
+	//IO::save01_in_u8(bft4Transition, std::string("/home/nlutz/bft4Transition.png"));
 
 	TandBFunctionType bftTri;
 	bftTri.blendingFunction = [&] (double u, double v)
@@ -394,8 +464,8 @@ int main(int argc, char **argv)
 
 	ImageGrayd bftTriBlending = bftTri.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bftTriTransition = bftTri.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bftTriBlending, std::string("/home/nlutz/bftTriBlending.png"));
-	IO::save01_in_u8(bftTriTransition, std::string("/home/nlutz/bftTriTransition.png"));
+	//IO::save01_in_u8(bftTriBlending, std::string("/home/nlutz/bftTriBlending.png"));
+	//IO::save01_in_u8(bftTriTransition, std::string("/home/nlutz/bftTriTransition.png"));
 
 	TandBFunctionType bftAltTri;
 	bftAltTri.blendingFunction = [&] (double u, double v)
@@ -432,8 +502,8 @@ int main(int argc, char **argv)
 
 	ImageGrayd bftAltTriBlending = bftAltTri.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bftAltTriTransition = bftAltTri.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bftAltTriBlending, std::string("/home/nlutz/bftAltTriBlending.png"));
-	IO::save01_in_u8(bftAltTriTransition, std::string("/home/nlutz/bftAltTriTransition.png"));
+	//IO::save01_in_u8(bftAltTriBlending, std::string("/home/nlutz/bftAltTriBlending.png"));
+	//IO::save01_in_u8(bftAltTriTransition, std::string("/home/nlutz/bftAltTriTransition.png"));
 
 	TandBFunctionType bftHex;
 	bftHex.blendingFunction = [&] (double u, double v)
@@ -461,8 +531,8 @@ int main(int argc, char **argv)
 
 	ImageGrayd bftHexBlending = bftHex.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bftHexTransition = bftHex.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bftHexBlending, std::string("/home/nlutz/bftHexBlending.png"));
-	IO::save01_in_u8(bftHexTransition, std::string("/home/nlutz/bftHexTransition.png"));
+	//IO::save01_in_u8(bftHexBlending, std::string("/home/nlutz/bftHexBlending.png"));
+	//IO::save01_in_u8(bftHexTransition, std::string("/home/nlutz/bftHexTransition.png"));
 
 	TandBFunctionType bftAlteratingSquares;
 	bftAlteratingSquares.blendingFunction = [&] (double u, double v) -> float
@@ -495,8 +565,8 @@ int main(int argc, char **argv)
 
 	ImageGrayd bftAltSquaresBlending = bftAlteratingSquares.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bftAltSquaresTransition = bftAlteratingSquares.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bftAltSquaresBlending, std::string("/home/nlutz/bftAltSquaresBlending.png"));
-	IO::save01_in_u8(bftAltSquaresTransition, std::string("/home/nlutz/bftAltSquaresTransition.png"));
+	//IO::save01_in_u8(bftAltSquaresBlending, std::string("/home/nlutz/bftAltSquaresBlending.png"));
+	//IO::save01_in_u8(bftAltSquaresTransition, std::string("/home/nlutz/bftAltSquaresTransition.png"));
 
 	TandBFunctionType bftRotSquare;
 	bftRotSquare.blendingFunction = [&] (double u, double v) -> float
@@ -541,8 +611,8 @@ int main(int argc, char **argv)
 
 	ImageGrayd bftRotSquareBlending = bftRotSquare.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bftRotSquareTransition = bftRotSquare.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bftRotSquareBlending, std::string("/home/nlutz/bftRotSquareBlending.png"));
-	IO::save01_in_u8(bftRotSquareTransition, std::string("/home/nlutz/bftRotSquareTransition.png"));
+	//IO::save01_in_u8(bftRotSquareBlending, std::string("/home/nlutz/bftRotSquareBlending.png"));
+	//IO::save01_in_u8(bftRotSquareTransition, std::string("/home/nlutz/bftRotSquareTransition.png"));
 
 	TandBFunctionType bftAltRotSquare;
 	bftAltRotSquare.blendingFunction = [&] (double u, double v) -> float
@@ -587,8 +657,8 @@ int main(int argc, char **argv)
 
 	ImageGrayd bftAltRotSquareBlending = bftAltRotSquare.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bftAltRotSquareTransition = bftAltRotSquare.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bftAltRotSquareBlending, std::string("/home/nlutz/bftAltRotSquareBlending.png"));
-	IO::save01_in_u8(bftAltRotSquareTransition, std::string("/home/nlutz/bftAltRotSquareTransition.png"));
+	//IO::save01_in_u8(bftAltRotSquareBlending, std::string("/home/nlutz/bftAltRotSquareBlending.png"));
+	//IO::save01_in_u8(bftAltRotSquareTransition, std::string("/home/nlutz/bftAltRotSquareTransition.png"));
 
 	TandBFunctionType::BlendingFunctionType blendingSingularityFunction = [&] (double u, double v) -> double
 	{
@@ -648,6 +718,25 @@ int main(int argc, char **argv)
 	std::string filename_cycles = std::string(argv[2]);
 	std::string name_exemplar = IO::remove_path(argv[3]);
 	std::string name_noext = IO::remove_ext(name_exemplar);
+	ImageType im_out;
+	TilingAndBlending<ImageType> perioBlend;
+	for(int i=3; i<argc; ++i)
+	{
+		ImageType im_in, im_out;
+		IO::loadu8_in_01(im_in, argv[i]);
+		perioBlend.addTexture(im_in);
+	}
+	TilingAndBlending<ImageType>::MaskType *im_mask = nullptr;
+	if(arguments.tryToUseMask)
+	{
+		im_mask = new TilingAndBlending<ImageType>::MaskType;
+		if(argc > 3)
+		{
+			IO::loadu8_in_01(*im_mask, argv[4]);
+		}
+		perioBlend.setContentWeightingMask(im_mask);
+		perioBlend.setWeightingMaskTest(arguments.contentMaskTest);
+	}
 	std::string suffix = name_noext + "_"
 			+ std::to_string(arguments.width) + "x"
 			+ std::to_string(arguments.height) +  "_uScale="
@@ -660,21 +749,16 @@ int main(int argc, char **argv)
 			+ (arguments.tiling == SQUARE_SQUARE ? "_SqSq" :
 				(arguments.tiling == ALTSQUARE_TRIANGULAR ? "_ASqTr" :
 				(arguments.tiling == ROTSQUARE_ROTSQUARE ? "_rotSqSq" :
-				(arguments.tiling == HEXAGONAL_TRIANGULAR ? "_hexTri" : "_unspecTiling"))))
+				(arguments.tiling == HEXAGONAL_TRIANGULAR ? "_hexTri" :
+				(arguments.tiling == FOUR_SQUARES ? "_4Sq" : "_unspecTiling")))))
 			+ (arguments.useSingularityHider ? "_SH" : "_noSH")
 			+ "_uTr=" + std::to_string(arguments.uTranslation)
 			+ "_vTr=" + std::to_string(arguments.vTranslation)
-			+ (arguments.useAutocovarianceSampling ? "_ACSampling" : "")
-			+ (arguments.cheatAutocovariance ? "_cheatedAC" : "")
+			+ (arguments.useAutocovarianceSampling ? (arguments.useCustomImportanceMap ? "_customSampling" : "_ACSampling") : "")
+			+ (arguments.cheatAutocovariance && arguments.useAutocovarianceSampling ? "_cheatedAC" : "")
+			+ (im_mask != nullptr ? "_withMask" : "")
+			+ (im_mask != nullptr ? "_m" + std::to_string(arguments.contentMaskTest) : "")
 			+".png";
-	ImageType im_out;
-	TilingAndBlending<ImageType> perioBlend;
-	for(int i=3; i<argc; ++i)
-	{
-		ImageType im_in, im_out;
-		IO::loadu8_in_01(im_in, argv[i]);
-		perioBlend.addTexture(im_in);
-	}
 
 	CycleMapType loadedCycles = loadCycles(filename_cycles);
 	std::string textureName = IO::remove_ext(IO::remove_path(name_exemplar));
@@ -701,6 +785,12 @@ int main(int argc, char **argv)
 		perioBlend.addFunction(bftTri);
 		perioBlend.addFunction(bftHex);
 		break;
+	case FOUR_SQUARES:
+		perioBlend.addFunction(bft1);
+		perioBlend.addFunction(bft2);
+		perioBlend.addFunction(bft3);
+		perioBlend.addFunction(bft4);
+		break;
 	}
 
 
@@ -717,61 +807,128 @@ int main(int argc, char **argv)
 	perioBlend.setRandomAffineTransform(rAffT);
 
 	ImageGrayd bftSumBlending = perioBlend.visualizeBlendingSum(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	IO::save01_in_u8(bftSumBlending, std::string("/home/nlutz/bftSumBlending.png"));
+	//IO::save01_in_u8(bftSumBlending, std::string("/home/nlutz/bftSumBlending.png"));
 
 	perioBlend.setCSCycles(cyclePair.vectors[0], cyclePair.vectors[1]);
 	perioBlend.setCSPolyphaseComponentSamplesNumber(Eigen::Vector2i(1, 1));
 
-	ImageGrayd r, g, b, autocorrelation;
+	unsigned int indexCustomMap = 4;
+	if(arguments.useCustomImportanceMap && arguments.tryToUseMask)
+	{
+		indexCustomMap = 5;
+	}
+	ImageGrayd customMap;
+	if(argc > indexCustomMap)
+	{
+		IO::loadu8_in_01(customMap, argv[indexCustomMap]);
+	}
+	else
+	{
+		arguments.useCustomImportanceMap = false;
+		arguments.useAutocovarianceSampling = false;
+	}
+
+	ImageGrayd L, a, b, autocorrelation;
 	if(arguments.isCyclostationary)
+	{
 		im_out = perioBlend.synthesize_cyclostationary();
+		im_out.for_all_pixels([&] (ImageType::PixelType &pix)
+		{
+			for(unsigned i=0; i<3; ++i)
+				pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
+		});
+		IO::save01_in_u8(im_out, std::string("/home/nlutz/") + suffix);
+	}
 	else
 	{
 		if(arguments.useAutocovarianceSampling || arguments.compareAutocovariance)
 		{
-			ImageType im_in;
-			IO::loadu8_in_01(im_in, argv[3]);
-			if(im_in.width()>512 || im_in.height()>512)
-			{ //I just want to scale an exemplar, why does it take like a million lines with itk
-				ImageType::ItkImg::SizeType inputSize  = im_in.itk()->GetLargestPossibleRegion().GetSize();
-				ImageType::ItkImg::SizeType outputSize;
-				outputSize[0] = std::min(512, im_in.width());
-				outputSize[1] = std::min(512, im_in.height());
-				using TransformType = itk::IdentityTransform <double, 2>;
-				using ResampleImageFilterType = itk::ResampleImageFilter<ImageType::ItkImg, ImageType::ItkImg>;
-
-				ImageType::ItkImg::SpacingType outputSpacing;
-				outputSpacing[0] = im_in.itk()->GetSpacing()[0] * (double(inputSize[0]) / double(outputSize[0]));
-				outputSpacing[1] = im_in.itk()->GetSpacing()[1] * (double(inputSize[1]) / double(outputSize[1]));
-
-				ResampleImageFilterType::Pointer resample = ResampleImageFilterType::New();
-				resample->SetInput(im_in.itk());
-				resample->SetSize(outputSize);
-				resample->SetOutputSpacing(outputSpacing);
-				resample->SetTransform(TransformType::New());
-				resample->UpdateOutputInformation();
-				resample->Update();
-				im_in.itk() = resample->GetOutput();
-			}
-			IO::save01_in_u8(im_in, "/home/nlutz/scaled.png");
-			extract3Channels(im_in, r, g, b);
-			Fourier::truePeriodicStationaryAutocovariance(r, autocorrelation, true, false);
-			autocorrelation.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+			bool rescaled = false;
+			double widthScale = 0;
+			double heightScale = 0;
+			if(!arguments.useCustomImportanceMap)
 			{
-				if(arguments.cheatAutocovariance)
+				ImageType im_in;
+				IO::loadu8_in_01(im_in, argv[3]);
+				if(im_in.width()>512 || im_in.height()>512)
+				{ //I just want to scale an exemplar, why does it take like a million lines with itk
+					rescaled = true;
+					ImageType::ItkImg::SizeType inputSize  = im_in.itk()->GetLargestPossibleRegion().GetSize();
+					ImageType::ItkImg::SizeType outputSize;
+					outputSize[0] = std::min(512, im_in.width());
+					outputSize[1] = std::min(512, im_in.height());
+					using TransformType = itk::IdentityTransform <double, 2>;
+					using ResampleImageFilterType = itk::ResampleImageFilter<ImageType::ItkImg, ImageType::ItkImg>;
+
+					widthScale = (double(inputSize[0]) / double(outputSize[0]));
+					heightScale = (double(inputSize[1]) / double(outputSize[1]));
+					ImageType::ItkImg::SpacingType outputSpacing;
+					outputSpacing[0] = im_in.itk()->GetSpacing()[0] * widthScale;
+					outputSpacing[1] = im_in.itk()->GetSpacing()[1] * heightScale;
+
+					ResampleImageFilterType::Pointer resample = ResampleImageFilterType::New();
+					resample->SetInput(im_in.itk());
+					resample->SetSize(outputSize);
+					resample->SetOutputSpacing(outputSpacing);
+					resample->SetTransform(TransformType::New());
+					resample->UpdateOutputInformation();
+					resample->Update();
+					im_in.itk() = resample->GetOutput();
+				}
+				ImageType res;
+				PCA<double> pca(im_in);
+				MaskBool mb(im_in.width(), im_in.height());
+				mb |= [] (int, int) {return true;};
+				pca.computePCA(mb);
+				pca.project(res);
+				extract3Channels(res, L, a, b);
+
+				//extractLab(im_in, L, a, b, true);
+				IO::save01_in_u8(L, "/home/nlutz/L.png");
+				if(!arguments.useCustomImportanceMap && !arguments.computeOnlyOutputAutocovariance)
 				{
-					pix = pix > 0 ? 0 : -pix;
+					Fourier::truePeriodicStationaryAutocovariance(L, autocorrelation, true, false);
+					autocorrelation.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+					{
+						if(arguments.cheatAutocovariance)
+						{
+							pix = pix > 0 ? 0 : -pix;
+						}
+						else
+						{
+							pix = pix < 0 ? 0 : pix;
+						}
+					});
+					IO::save01_in_u8(autocorrelation, "/home/nlutz/autocorrelation_" + suffix);
+				}
+			}
+			if(arguments.useAutocovarianceSampling)
+			{
+				Stamping::SamplerImportance *si = nullptr;
+				if(arguments.useCustomImportanceMap)
+				{
+					if(arguments.importanceMapCutThreshold > 0)
+					{
+						customMap.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
+						{
+							pix = pix < arguments.importanceMapCutThreshold ? 0 : arguments.importanceMapCutThreshold;
+						});
+						IO::save01_in_u8(customMap, "/home/nlutz/adjustedImportanceMap_" + suffix);
+					}
+					si = new Stamping::SamplerImportance(customMap);
 				}
 				else
 				{
-					pix = pix < 0 ? 0 : pix;
+					if(arguments.importanceMapCutThreshold > 0)
+					{
+						autocorrelation.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
+						{
+							pix = pix < arguments.importanceMapCutThreshold ? 0 : arguments.importanceMapCutThreshold;
+						});
+						IO::save01_in_u8(autocorrelation, "/home/nlutz/adjustedImportanceMap_" + suffix);
+					}
+					si = new Stamping::SamplerImportance(autocorrelation);
 				}
-			});
-			IO::save01_in_u8(autocorrelation, "/home/nlutz/autocorrelation" + suffix);
-
-			if(arguments.useAutocovarianceSampling)
-			{
-				Stamping::SamplerImportance *si = new Stamping::SamplerImportance(autocorrelation);
 				perioBlend.setImportanceSampler(si);
 				im_out = perioBlend.synthesize_stationary();
 				delete si;
@@ -781,20 +938,25 @@ int main(int argc, char **argv)
 			{
 				im_out = perioBlend.synthesize_stationary();
 			}
+			im_out.for_all_pixels([&] (ImageType::PixelType &pix)
+			{
+				for(unsigned i=0; i<3; ++i)
+					pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
+			});
+			IO::save01_in_u8(im_out, std::string("/home/nlutz/") + suffix);
 			if(arguments.compareAutocovariance)
 			{
-				if(im_out.width()>512 || im_out.height()>512)
+				if(rescaled)
 				{ //I just want to scale an exemplar, why does it take like a million lines with itk
-					ImageType::ItkImg::SizeType inputSize  = im_in.itk()->GetLargestPossibleRegion().GetSize();
-					ImageType::ItkImg::SizeType outputSize;
-					outputSize[0] = std::min(512, im_out.width());
-					outputSize[1] = std::min(512, im_out.height());
 					using TransformType = itk::IdentityTransform <double, 2>;
 					using ResampleImageFilterType = itk::ResampleImageFilter<ImageType::ItkImg, ImageType::ItkImg>;
+					ImageType::ItkImg::SizeType outputSize;
+					outputSize[0] = im_out.width() * widthScale;
+					outputSize[1] = im_out.height() * heightScale;
 
 					ImageType::ItkImg::SpacingType outputSpacing;
-					outputSpacing[0] = im_out.itk()->GetSpacing()[0] * (double(inputSize[0]) / double(outputSize[0]));
-					outputSpacing[1] = im_out.itk()->GetSpacing()[1] * (double(inputSize[1]) / double(outputSize[1]));
+					outputSpacing[0] = im_out.itk()->GetSpacing()[0] * widthScale;
+					outputSpacing[1] = im_out.itk()->GetSpacing()[1] * heightScale;
 
 					ResampleImageFilterType::Pointer resample = ResampleImageFilterType::New();
 					resample->SetInput(im_out.itk());
@@ -806,57 +968,62 @@ int main(int argc, char **argv)
 					im_out.itk() = resample->GetOutput();
 				}
 				ImageGrayd autocorrelation_out;
-				extract3Channels(im_out, r, g, b);
-				Fourier::truePeriodicStationaryAutocovariance(r, autocorrelation_out, true, false);
+				extractLab(im_out, L, a, b, true);
+
+				Fourier::trueBoundedStationaryAutocovariance(L, autocorrelation_out, true, false, 512, 512);
 				autocorrelation_out.for_all_pixels([&] (ImageGrayd::PixelType &pix)
 				{
 					pix = pix < 0 ? 0 : pix;
 				});
-				IO::save01_in_u8(autocorrelation_out, "/home/nlutz/autocorrelation_out" + suffix);
+				IO::save01_in_u8(autocorrelation_out, "/home/nlutz/autocorrelation_out_" + suffix);
 				assert(autocorrelation.width() == autocorrelation_out.width());
-				ImageGrayd norm2diff;
-				norm2diff.initItk(autocorrelation.width(), autocorrelation.height());
-				double totalDiff;
-				norm2diff.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
+				if(!arguments.computeOnlyOutputAutocovariance)
 				{
-					ImageGrayd::PixelType &pixACIn = autocorrelation.pixelAbsolute(x, y);
-					ImageGrayd::PixelType &pixACOut = autocorrelation_out.pixelAbsolute(x, y);
-					pix = std::sqrt((pixACIn - pixACOut) * (pixACIn - pixACOut));
-					totalDiff += pix;
-				});
-				std::cout << "autocovariance diff=" << totalDiff/(norm2diff.width()*norm2diff.height()) << std::endl;
-				IO::save01_in_u8(norm2diff, "/home/nlutz/autocorrelationNorm2Diff" + suffix);
+					ImageGrayd norm2diff;
+					norm2diff.initItk(autocorrelation.width(), autocorrelation.height());
+					double totalDiff;
+					norm2diff.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
+					{
+						ImageGrayd::PixelType &pixACIn = autocorrelation.pixelAbsolute(x, y);
+						ImageGrayd::PixelType &pixACOut = autocorrelation_out.pixelAbsolute(x, y);
+						pix = std::sqrt((pixACIn - pixACOut) * (pixACIn - pixACOut));
+						totalDiff += pix;
+					});
+					std::cout << "autocovariance diff=" << totalDiff/(norm2diff.width()*norm2diff.height()) << std::endl;
+					IO::save01_in_u8(norm2diff, "/home/nlutz/autocorrelationNorm2Diff" + suffix);
+				}
 			}
 		}
 		else
 		{
 			im_out = perioBlend.synthesize_stationary();
+			im_out.for_all_pixels([&] (ImageType::PixelType &pix)
+			{
+				for(unsigned i=0; i<3; ++i)
+					pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
+			});
+			IO::save01_in_u8(im_out, std::string("/home/nlutz/") + suffix);
 		}
 	}
 
 
-	ImageRGBd im_visualizeSynthesis = perioBlend.visualizeSynthesis(outputWidth, outputHeight);
+	//ImageRGBd im_visualizeSynthesis = perioBlend.visualizeSynthesis(outputWidth, outputHeight);
 
-	ImageGrayd bft1BlendingNormalized = divideBySum(bft1Blending, bftSumBlending);
-	ImageGrayd bft2BlendingNormalized = divideBySum(bft2Blending, bftSumBlending);
+//	ImageGrayd bft1BlendingNormalized = divideBySum(bft1Blending, bftSumBlending);
+//	ImageGrayd bft2BlendingNormalized = divideBySum(bft2Blending, bftSumBlending);
 
-	IO::save01_in_u8(bft1BlendingNormalized, std::string("/home/nlutz/bft1BlendingNormalized.png"));
-	IO::save01_in_u8(bft2BlendingNormalized, std::string("/home/nlutz/bft2BlendingNormalized.png"));
+//	IO::save01_in_u8(bft1BlendingNormalized, std::string("/home/nlutz/bft1BlendingNormalized.png"));
+//	IO::save01_in_u8(bft2BlendingNormalized, std::string("/home/nlutz/bft2BlendingNormalized.png"));
 
-	im_visualizeSynthesis.for_all_pixels([&] (ImageType::PixelType &pix)
-	{
-		for(unsigned i=0; i<3; ++i)
-			pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
-	});
+//	im_visualizeSynthesis.for_all_pixels([&] (ImageType::PixelType &pix)
+//	{
+//		for(unsigned i=0; i<3; ++i)
+//			pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
+//	});
 
-	im_out.for_all_pixels([&] (ImageType::PixelType &pix)
-	{
-		for(unsigned i=0; i<3; ++i)
-			pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
-	});
-
-	IO::save01_in_u8(im_out, std::string("/home/nlutz/") + suffix);
-	IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_") + suffix);
+	//IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_") + suffix);
 	IO::save01_in_u8(perioBlend.visualizePrimalAndDual(), std::string("/home/nlutz/blending_") + suffix);
+	if(im_mask != nullptr)
+		delete im_mask;
 	return 0;
 }

@@ -135,7 +135,8 @@ template <typename REAL, typename std::enable_if<std::is_floating_point<REAL>::v
 void extractLab(const ImageCommon<ImageRGBBase<REAL>, false>& rgbImage,
 				ImageCommon<ImageGrayBase<REAL>, false>& LChannel,
 				ImageCommon<ImageGrayBase<REAL>, false>& aChannel,
-				ImageCommon<ImageGrayBase<REAL>, false>& bChannel)
+				ImageCommon<ImageGrayBase<REAL>, false>& bChannel,
+				bool normalize_lab = false)
 {
 	LChannel.initItk(rgbImage.width(), rgbImage.height());
 	aChannel.initItk(rgbImage.width(), rgbImage.height());
@@ -155,6 +156,13 @@ void extractLab(const ImageCommon<ImageRGBBase<REAL>, false>& rgbImage,
 		bChannel.pixelAbsolute(x, y)=LabPix[2];
 	});
 
+	if(normalize_lab)
+	{
+		LChannel.for_all_pixels([&] (typename ImageCommon<ImageGrayBase<REAL>, false>::PixelType& pix)
+		{
+			pix = pix/100.0;
+		});
+	}
 	return;
 }
 

@@ -134,6 +134,7 @@ public:
 	using LutType					= PcaImageType;
 	using ProceduralBlendingType	= std::function<PcaImageType(const PcaImageType &)>;
 	using PtrImageType				= ImageGrayu64;
+	using MaskType					= ImageGrayd;
 
 	TilingAndBlending();
 
@@ -221,6 +222,10 @@ public:
 	//Importance sampling DLC
 	void setImportanceSampler(Stamping::SamplerImportance *sampler);
 
+	//Content masking DLC
+	void setContentWeightingMask(MaskType *contentWeightingMask);
+	void setWeightingMaskTest(unsigned int testNumber);
+
 
 private:
 
@@ -252,6 +257,10 @@ private:
 
 	//Importance sampling DLC
 	Stamping::SamplerImportance *m_sampler;
+
+	//Content masking DLC
+	MaskType					*m_contentWeightingMask;
+	int							m_contentMaskTest; //since we don't know what the best course of action is...
 };
 
 template<typename I>
@@ -266,7 +275,8 @@ TilingAndBlending<I>::TilingAndBlending() :
 	m_vScale(1.0),
 	m_useTransfer(true),
 	m_randomAffineTransform(),
-	m_sampler(nullptr)
+	m_sampler(nullptr),
+	m_contentWeightingMask(nullptr)
 {}
 
 template<typename I>
@@ -328,6 +338,46 @@ typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_statio
 		for(auto const &fonctions : m_functions)
 		{
 			double blendingValue = fonctions.blendingFunction(u * m_uScale, v * m_vScale);
+			if(m_contentWeightingMask != nullptr) //annoying
+			{
+				Eigen::Vector2i tile = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
+				Vec2 uvTexture = hash(tile.cast<double>());
+				uvTexture[0] += u;
+				uvTexture[1] += v;
+				AffineTransform affT = m_randomAffineTransform.generate(true, cantorPairingFunction(tile));
+				Vec2 uvTextureFract = CSN::CSN_Texture<I>::fract(affT.transform()*uvTexture);
+				PixelPosType xyTexture;
+				xyTexture[0] = int(uvTextureFract[0] * texture.width()) % texture.width();
+				xyTexture[1] = int(uvTextureFract[1] * texture.height()) % texture.height();
+				double periodicWeight = m_contentWeightingMask->pixelAbsolute(x%texture.width(), y%texture.height());
+				double contentWeight = m_contentWeightingMask->pixelAbsolute(xyTexture);
+				switch(m_contentMaskTest)
+				{
+				case 0:
+					blendingValue *= contentWeight;
+					break;
+				case 1:
+					blendingValue *= std::max(0.001, (1.0 - contentWeight));
+					break;
+				case 2:
+				{
+					double weightDist = std::sqrt((periodicWeight - contentWeight)*(periodicWeight - contentWeight));
+					blendingValue *= 1.0 - std::min(0.99, weightDist);
+					break;
+				}
+				case 3:
+				{
+					double weightScale = (1.0-periodicWeight)*(1.0-contentWeight) + (periodicWeight * contentWeight);
+					blendingValue *= std::max(0.01, pow(weightScale, 2.0));
+					break;
+				}
+				case 4:
+				{
+					double weightScale = (1.0-contentWeight);
+					blendingValue *= std::max(0.01, weightScale);
+				}
+				}
+			}
 			sum += blendingValue;
 		}
 		if(m_singularityBlendingFunction != nullptr)
@@ -335,6 +385,8 @@ typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_statio
 			double blendingValue = m_singularityBlendingFunction(u * m_uScale, v * m_vScale);
 			sum += blendingValue;
 		}
+		unsigned int k=0;
+		double w = 0;
 		for(auto const &fonctions : m_functions)
 		{
 			Eigen::Vector2i tile = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
@@ -351,6 +403,37 @@ typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_statio
 			xyTexture[0] = int(uvTextureFract[0] * pcaTexture.width()) % pcaTexture.width();
 			xyTexture[1] = int(uvTextureFract[1] * pcaTexture.height()) % pcaTexture.height();
 			double blendingValue = fonctions.blendingFunction(u * m_uScale, v * m_vScale) / sum;
+			if(m_contentWeightingMask != nullptr)
+			{
+				double periodicWeight = m_contentWeightingMask->pixelAbsolute(x%pcaTexture.width(), y%pcaTexture.height());
+				double contentWeight = m_contentWeightingMask->pixelAbsolute(xyTexture);
+				switch(m_contentMaskTest)
+				{
+				case 0:
+					blendingValue *= contentWeight;
+					break;
+				case 1:
+					blendingValue *= std::max(0.001, (1.0 - contentWeight));
+					break;
+				case 2:
+				{
+					double weightDist = std::sqrt((periodicWeight - contentWeight)*(periodicWeight - contentWeight));
+					blendingValue *= 1.0 - std::min(0.99, weightDist);
+					break;
+				}
+				case 3:
+				{
+					double weightScale = (1.0-periodicWeight)*(1.0-contentWeight) + (periodicWeight * contentWeight);
+					blendingValue *= std::max(0.01, pow(weightScale, 2.0));
+					break;
+				}
+				case 4:
+				{
+					double weightScale = (1.0-contentWeight)*contentWeight;
+					blendingValue *= std::max(0.01, weightScale);
+				}
+				}
+			}
 			pix += pcaGaussianTexture.pixelAbsolute(xyTexture) * blendingValue;
 			sumSquare += blendingValue*blendingValue;
 		}
@@ -395,10 +478,49 @@ ImageRGBd TilingAndBlending<I>::visualizePrimalAndDual()
 		double u = double(x)/(texture.width()-1);
 		double v = double(y)/(texture.height()-1);
 		double sum = 0;
-		double sumSquare = 0;
 		for(auto const &fonctions : m_functions)
 		{
 			double blendingValue = fonctions.blendingFunction(u * m_uScale, v * m_vScale);
+			if(m_contentWeightingMask != nullptr)
+			{
+				Eigen::Vector2i tile = fonctions.tilingFunction(u * m_uScale, v * m_vScale);
+				Vec2 uvTexture = hash(tile.cast<double>());
+				uvTexture[0] += u;
+				uvTexture[1] += v;
+				AffineTransform affT = m_randomAffineTransform.generate(true, cantorPairingFunction(tile));
+				Vec2 uvTextureFract = CSN::CSN_Texture<I>::fract(affT.transform()*uvTexture);
+				PixelPosType xyTexture;
+				xyTexture[0] = int(uvTextureFract[0] * texture.width()) % texture.width();
+				xyTexture[1] = int(uvTextureFract[1] * texture.height()) % texture.height();
+				double periodicWeight = m_contentWeightingMask->pixelAbsolute(x%texture.width(), y%texture.height());
+				double contentWeight = m_contentWeightingMask->pixelAbsolute(xyTexture);
+				switch(m_contentMaskTest)
+				{
+				case 0:
+					blendingValue *= contentWeight;
+					break;
+				case 1:
+					blendingValue *= std::max(0.001, (1.0 - contentWeight));
+					break;
+				case 2:
+				{
+					double weightDist = std::sqrt((periodicWeight - contentWeight)*(periodicWeight - contentWeight));
+					blendingValue *= 1.0 - std::min(0.99, weightDist);
+					break;
+				}
+				case 3:
+				{
+					double weightScale = (1.0-periodicWeight)*(1.0-contentWeight) + (periodicWeight * contentWeight);
+					blendingValue *= std::max(0.01, pow(weightScale, 2.0));
+					break;
+				}
+				case 4:
+				{
+					double weightScale = (1.0-contentWeight);
+					blendingValue *= std::max(0.01, weightScale);
+				}
+				}
+			}
 			sum += blendingValue;
 		}
 		if(m_singularityBlendingFunction != nullptr)
@@ -419,21 +541,54 @@ ImageRGBd TilingAndBlending<I>::visualizePrimalAndDual()
 			xyTexture[0] = int(uvTextureFract[0] * texture.width()) % texture.width();
 			xyTexture[1] = int(uvTextureFract[1] * texture.height()) % texture.height();
 			double blendingValue = fonctions.blendingFunction(u * m_uScale, v * m_vScale) / sum;
-			pix[i++] = blendingValue*blendingValue;
-			sumSquare += blendingValue*blendingValue;
+			if(m_contentWeightingMask != nullptr)
+			{
+				double periodicWeight = m_contentWeightingMask->pixelAbsolute(x%texture.width(), y%texture.height());
+				double contentWeight = m_contentWeightingMask->pixelAbsolute(xyTexture);
+				switch(m_contentMaskTest)
+				{
+				case 0:
+					blendingValue *= contentWeight;
+					break;
+				case 1:
+					blendingValue *= std::max(0.001, (1.0 - contentWeight));
+					break;
+				case 2:
+				{
+					double weightDist = std::sqrt((periodicWeight - contentWeight)*(periodicWeight - contentWeight));
+					blendingValue *= 1.0 - std::min(0.99, weightDist);
+					break;
+				}
+				case 3:
+				{
+					double weightScale = (1.0-periodicWeight)*(1.0-contentWeight) + (periodicWeight * contentWeight);
+					blendingValue *= std::max(0.01, pow(weightScale, 2.0));
+					break;
+				}
+				case 4:
+				{
+					double weightScale = (1.0-contentWeight);
+					blendingValue *= std::max(0.01, weightScale);
+				}
+				}
+			}
+			pix[i] = blendingValue;
+			++i;
 		}
 		if(m_singularityBlendingFunction != nullptr)
 		{
 			double blendingValue = m_singularityBlendingFunction(u * m_uScale, v * m_vScale) / sum;
-			pix[i++] = blendingValue*blendingValue;
-			sumSquare += blendingValue*blendingValue;
+			pix[i++] = blendingValue;
 		}
-		sumSquare = std::sqrt(sumSquare);
-		pix[0] += 0.2;
-		pix[1] += 0.2;
+		else
+		{
+			pix[2] = 0;
+		}
+		//sum = std::sqrt(sum);
+		pix[0] += 0.0;
+		pix[1] += 0.0; //0.2 pour visu
 		for(unsigned int i=0; i<3; ++i)
 		{
-			pix[i] /= sumSquare;
 			pix[i] = std::max(std::min(1.0, pix[i]), 0.0);
 		}
 	});
@@ -944,7 +1099,7 @@ typename TilingAndBlending<I>::ImageType TilingAndBlending<I>::synthesize_cyclos
 			inCoordinates[1] = int(std::round(inY + (subX*m_cs_t0[1] + subY*m_cs_t1[1])*(exemplarHeight)))%pcaOutputCopy.height();
 			pcaTexture.pixelAbsolute(inCoordinates) = pix;
 		});
-		std::cout << pcaUnfoldedSubTexture.width() << std::endl;
+		//std::cout << pcaUnfoldedSubTexture.width() << std::endl;
 	});
 	if(m_useTransfer)
 	{
@@ -967,6 +1122,18 @@ template<typename I>
 void TilingAndBlending<I>::setImportanceSampler(Stamping::SamplerImportance *sampler)
 {
 	m_sampler = sampler;
+}
+
+template<typename I>
+void TilingAndBlending<I>::setContentWeightingMask(MaskType *contentWeightingMask)
+{
+	m_contentWeightingMask = contentWeightingMask;
+}
+
+template<typename I>
+void TilingAndBlending<I>::setWeightingMaskTest(unsigned int testNumber)
+{
+	m_contentMaskTest = testNumber;
 }
 
 template<typename I>
@@ -998,7 +1165,7 @@ typename TilingAndBlending<I>::Vec2 TilingAndBlending<I>::importanceHash(const V
 {
 	assert(m_sampler && "importanceHash: no sampler is set.");
 	const ImageType &texture = m_texturePool[0].texture;
-	srand(int(p[1]*(1<<14)*texture.width()) + int(p[0]*(1<<14)));
+	srand(cantorPairingFunction(Vec2i(p[0]+1, p[1]+1)));
 	Eigen::Vector2f pf = m_sampler->next();
 	return Eigen::Vector2d(double(pf[0]), double(pf[1]));
 }

@@ -351,7 +351,8 @@ double ASTEX_API stationaryMean(const ImageGrayd& input);
 
 double ASTEX_API stationaryVariance(const ImageGrayd& input);
 
-bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool correlation=false, bool logScale=false);
+bool truePeriodicStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool computeCorrelation=false, bool logScale=false);
+bool trueBoundedStationaryAutocovariance(const ImageGrayd& input, ImageGrayd& autocorrelation, bool computeCorrelation=false, bool logScale=false, unsigned int width=0, unsigned int height=0);
 
 bool secondCenteredMomentOfOrder(const ImageGrayd& input, ImageGrayd& autocorrelation, bool correlation=false);
 

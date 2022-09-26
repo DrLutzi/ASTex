@@ -160,7 +160,6 @@ int main(int argc, char **argv)
 		pdf.initItk(acorr.width(), acorr.height(), true);
 		Stamping::SamplerImportance sampler(acorr);
 		csn.setSampler(&sampler);
-		csn.setUseSampler(false);
 	}
 	csn.setCycles(Eigen::Vector2d(), Eigen::Vector2d());
 	csn.setUseCycles(false);

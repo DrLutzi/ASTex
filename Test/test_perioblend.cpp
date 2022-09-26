@@ -97,6 +97,7 @@ typedef struct
 	bool useCustomImportanceMap;
 	double importanceMapCutThreshold;
 	bool computeOnlyOutputAutocovariance;
+	bool computeInputAutocovarianceAndStop;
 	int contentMaskTest;
 } ArgumentsType;
 
@@ -201,6 +202,10 @@ ArgumentsType loadArguments(std::string argFilename)
 				{
 					arguments.computeOnlyOutputAutocovariance = bool(std::stoi(value));
 				}
+				else if(key == "computeInputAutocovarianceAndStop")
+				{
+					arguments.computeInputAutocovarianceAndStop = bool(std::stoi(value));
+				}
 				else if(key == "contentMaskTest")
 				{
 					arguments.contentMaskTest = std::stoi(value);
@@ -291,10 +296,10 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	ArgumentsType arguments=loadArguments(argv[1]);
-	unsigned int visualizationWidth = 256;
-	unsigned int visualizationHeight = 128;
+	unsigned int visualizationWidth = 1024;
+	unsigned int visualizationHeight = 1024;
 	double visualizationU = 4.0;
-	double visualizationV = 2.0;
+	double visualizationV = 4.0;
 
 	using ImageType = ASTex::ImageRGBd;
 	auto divideBySum = [&] (const ASTex::ImageGrayd &blendingFunction, const ASTex::ImageGrayd &sumFunction) -> ImageGrayd
@@ -341,7 +346,14 @@ int main(int argc, char **argv)
 		v += arguments.vTranslation;
 		float sinU = std::sin(u*M_PI);
 		float sinV = std::sin(v*M_PI);
-		return sqrt(sinU*sinU * sinV*sinV);
+		//return sqrt(sinU*sinU * sinV*sinV);
+		double uFract = u-(int(u));
+		double vFract = v-(int(v));
+		double uDist = std::min(uFract, 1.0-uFract)*2.0;
+		double vDist = std::min(vFract, 1.0-vFract)*2.0;
+		return 1;
+		//return pow(std::min(uDist, vDist), 2.0);
+		//return pow(uDist*vDist, 3.0);
 	};
 	bft1.tilingFunction = [&] (double u, double v)
 	{
@@ -354,7 +366,7 @@ int main(int argc, char **argv)
 	};
 	ImageGrayd bft1Blending = bft1.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bft1Transition = bft1.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	//IO::save01_in_u8(bft1Blending, std::string("/home/nlutz/bft1Blending.png"));
+	IO::save01_in_u8(bft1Blending, std::string("/home/nlutz/bft1Blending.png"));
 	//IO::save01_in_u8(bft1Transition, std::string("/home/nlutz/bft1Transition.png"));
 
 	TandBFunctionType bft2;
@@ -366,21 +378,28 @@ int main(int argc, char **argv)
 		v += 0.5;
 		float sinU = std::sin(u*M_PI);
 		float sinV = std::sin(v*M_PI);
-		return sqrt(sinU*sinU * sinV*sinV);
+		//return sqrt(sinU*sinU * sinV*sinV);
+		double uFract = u-(int(u));
+		double vFract = v-(int(v));
+		double uDist = std::min(uFract, 1.0-uFract)*2.0;
+		double vDist = std::min(vFract, 1.0-vFract)*2.0;
+		return 0;
+		//return pow(std::min(uDist, vDist), 2.0);
+		//return pow(uDist*vDist, 3.0);
 	};
 	bft2.tilingFunction = [&] (double u, double v)
 	{
 		u += arguments.uTranslation;
 		v += arguments.vTranslation;
 		Eigen::Vector2i vec;
-		vec[0] = int(floor(u + 0.5)*127);
-		vec[1] = int(floor(v + 0.5)*127);
+		vec[0] = int(floor(u + 0.5)*127) + 73;
+		vec[1] = int(floor(v + 0.5)*127) + 147;
 		return vec;
 	};
 
 	ImageGrayd bft2Blending = bft2.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bft2Transition = bft2.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	//IO::save01_in_u8(bft2Blending, std::string("/home/nlutz/bft2Blending.png"));
+	IO::save01_in_u8(bft2Blending, std::string("/home/nlutz/bft2Blending.png"));
 	//IO::save01_in_u8(bft2Transition, std::string("/home/nlutz/bft2Transition.png"));
 
 	TandBFunctionType bft3;
@@ -391,7 +410,13 @@ int main(int argc, char **argv)
 		u+=0.5;
 		float sinU = std::sin(u*M_PI);
 		float sinV = std::sin(v*M_PI);
-		return sqrt(sinU*sinU * sinV*sinV);
+		//return sqrt(sinU*sinU * sinV*sinV);
+		double uFract = u-(int(u));
+		double vFract = v-(int(v));
+		double uDist = std::min(uFract, 1.0-uFract)*2.0;
+		double vDist = std::min(vFract, 1.0-vFract)*2.0;
+		return pow(std::min(uDist, vDist), 2.0);
+		//return pow(uDist*vDist, 3.0);
 	};
 	bft3.tilingFunction = [&] (double u, double v)
 	{
@@ -399,13 +424,13 @@ int main(int argc, char **argv)
 		v += arguments.vTranslation;
 		u+=0.5;
 		Eigen::Vector2i vec;
-		vec[0] = int(u)*63;
-		vec[1] = int(v)*63;
+		vec[0] = int(u)*1023 + 47;
+		vec[1] = int(v)*1023 + 34;
 		return vec;
 	};
 	ImageGrayd bft3Blending = bft3.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bft3Transition = bft3.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	//IO::save01_in_u8(bft3Blending, std::string("/home/nlutz/bft3Blending.png"));
+	IO::save01_in_u8(bft3Blending, std::string("/home/nlutz/bft3Blending.png"));
 	//IO::save01_in_u8(bft3Transition, std::string("/home/nlutz/bft3Transition.png"));
 
 	TandBFunctionType bft4;
@@ -416,7 +441,13 @@ int main(int argc, char **argv)
 		v+=0.5;
 		float sinU = std::sin(u*M_PI);
 		float sinV = std::sin(v*M_PI);
-		return sqrt(sinU*sinU * sinV*sinV);
+		//return sqrt(sinU*sinU * sinV*sinV);
+		double uFract = u-(int(u));
+		double vFract = v-(int(v));
+		double uDist = std::min(uFract, 1.0-uFract)*2.0;
+		double vDist = std::min(vFract, 1.0-vFract)*2.0;
+		return pow(std::min(uDist, vDist), 2.0);
+		//return pow(uDist*vDist, 3.0);
 	};
 	bft4.tilingFunction = [&] (double u, double v)
 	{
@@ -424,13 +455,13 @@ int main(int argc, char **argv)
 		v += arguments.vTranslation;
 		v+=0.5;
 		Eigen::Vector2i vec;
-		vec[0] = int(u)*63;
-		vec[1] = int(v)*63;
+		vec[0] = int(u)*4095 + 313;
+		vec[1] = int(v)*4095 + 247;
 		return vec;
 	};
 	ImageGrayd bft4Blending = bft4.visualizeBlending(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
 	ImageRGBd bft4Transition = bft4.visualizeTiling(visualizationWidth, visualizationHeight, visualizationU, visualizationV);
-	//IO::save01_in_u8(bft4Blending, std::string("/home/nlutz/bft4Blending.png"));
+	IO::save01_in_u8(bft4Blending, std::string("/home/nlutz/bft4Blending.png"));
 	//IO::save01_in_u8(bft4Transition, std::string("/home/nlutz/bft4Transition.png"));
 
 	TandBFunctionType bftTri;
@@ -841,7 +872,7 @@ int main(int argc, char **argv)
 	}
 	else
 	{
-		if(arguments.useAutocovarianceSampling || arguments.compareAutocovariance)
+		if(arguments.useAutocovarianceSampling || arguments.compareAutocovariance || arguments.computeInputAutocovarianceAndStop)
 		{
 			bool rescaled = false;
 			double widthScale = 0;
@@ -900,6 +931,8 @@ int main(int argc, char **argv)
 						}
 					});
 					IO::save01_in_u8(autocorrelation, "/home/nlutz/autocorrelation_" + suffix);
+					if(arguments.computeInputAutocovarianceAndStop)
+						exit(0);
 				}
 			}
 			if(arguments.useAutocovarianceSampling)
@@ -916,6 +949,7 @@ int main(int argc, char **argv)
 						IO::save01_in_u8(customMap, "/home/nlutz/adjustedImportanceMap_" + suffix);
 					}
 					si = new Stamping::SamplerImportance(customMap);
+					si->saveRealization("/home/nlutz/" + name_noext + ".map", 2048);
 				}
 				else
 				{
@@ -928,6 +962,7 @@ int main(int argc, char **argv)
 						IO::save01_in_u8(autocorrelation, "/home/nlutz/adjustedImportanceMap_" + suffix);
 					}
 					si = new Stamping::SamplerImportance(autocorrelation);
+					si->saveRealization("/home/nlutz/" + name_noext + ".map", 2048);
 				}
 				perioBlend.setImportanceSampler(si);
 				im_out = perioBlend.synthesize_stationary();
@@ -968,7 +1003,13 @@ int main(int argc, char **argv)
 					im_out.itk() = resample->GetOutput();
 				}
 				ImageGrayd autocorrelation_out;
-				extractLab(im_out, L, a, b, true);
+				ImageType res;
+				PCA<double> pca(im_out);
+				MaskBool mb(im_out.width(), im_out.height());
+				mb |= [] (int, int) {return true;};
+				pca.computePCA(mb);
+				pca.project(res);
+				extract3Channels(res, L, a, b);
 
 				Fourier::trueBoundedStationaryAutocovariance(L, autocorrelation_out, true, false, 512, 512);
 				autocorrelation_out.for_all_pixels([&] (ImageGrayd::PixelType &pix)
@@ -1022,7 +1063,7 @@ int main(int argc, char **argv)
 //	});
 
 	//IO::save01_in_u8(im_visualizeSynthesis, std::string("/home/nlutz/visualization_") + suffix);
-	IO::save01_in_u8(perioBlend.visualizePrimalAndDual(), std::string("/home/nlutz/blending_") + suffix);
+	//IO::save01_in_u8(perioBlend.visualizePrimalAndDual(), std::string("/home/nlutz/blending_") + suffix);
 	if(im_mask != nullptr)
 		delete im_mask;
 	return 0;

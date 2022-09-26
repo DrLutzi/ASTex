@@ -160,6 +160,24 @@ Eigen::Vector2f	SamplerImportance::next()
 	return m_distribution2D.SampleContinuous(base, &pdf);
 }
 
+void SamplerImportance::saveRealization(const std::string &outFilePath, unsigned int realizationSize)
+{
+	std::ofstream ofs(outFilePath);
+	assert(ofs);
+
+	ofs << realizationSize;
+	ofs << std::endl;
+	int nbPoints = m_nbPoints;
+	m_nbPoints = realizationSize;
+	std::vector<Eigen::Vector2f> vectors = generate();
+	for(const Eigen::Vector2f &v : vectors)
+	{
+		ofs << v[0] << ' ' << v[1] << std::endl;
+	}
+	m_nbPoints = nbPoints;
+	ofs.close();
+}
+
 } //namsepace Stamping
 
 } //namespace ASTex

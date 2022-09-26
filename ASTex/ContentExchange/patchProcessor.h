@@ -10,7 +10,6 @@
 #include "ASTex/Stamping/sampler.h"
 #include <random>
 #include "ASTex/PCTS/pcts.h"
-#include "ASTex/Stamping/sampler.h"
 
 namespace ASTex
 {
@@ -264,6 +263,9 @@ public:
 	iterator end() {return m_patches.end();}
 	const_iterator end() const {return m_patches.end();}
 
+	//importance sampling DLC
+	void setImportanceSampler(Stamping::SamplerImportance *importanceSampler);
+
 protected:
 
 	unsigned m_nbContentsPerPatch;
@@ -283,6 +285,9 @@ protected:
 	bool m_patchesOverlap;
 
 	static typename I::PixelType ms_zero;
+
+	//importance sampling DLC
+	Stamping::SamplerImportance *m_importanceSampler;
 };
 
 template<typename I>
@@ -300,7 +305,8 @@ PatchProcessor<I>::PatchProcessor():
 	m_seed(0),
 	m_atlas(0),
 	m_contentsAtlas(),
-	m_patchesOverlap(true)
+	m_patchesOverlap(true),
+	m_importanceSampler(nullptr)
 {}
 
 template<typename I>
@@ -315,7 +321,8 @@ PatchProcessor<I>::PatchProcessor(const I& texture):
 	m_seed(0),
 	m_atlas(0),
 	m_contentsAtlas(),
-	m_patchesOverlap(true)
+	m_patchesOverlap(true),
+	m_importanceSampler(nullptr)
 {}
 
 template<typename I>
@@ -935,6 +942,7 @@ Mipmap<I> PatchProcessor<I>::generate() const
 		I &mipmap = mipmapOutput.mipmap(k, l);
 		mipmap.for_all_pixels([&] (typename I::PixelType &pix, int x, int y)
 		{
+			ImageRGBd::PixelType pix_double = ImageRGBd::zero();
 			pix=PatchProcessor<I>::ms_zero;
 			//the following utilizes bitmasks to read the data of each mipmap
 			int xClamped = x%m_patchMapMipmap.mipmap(k, l).width();
@@ -943,6 +951,7 @@ Mipmap<I> PatchProcessor<I>::generate() const
 									 xClamped,
 									 yClamped) );
 			word64 w=0x1;
+			int hit = 0;
 			for(size_t p=0; p<m_patches.size(); ++p)
 			{
 				word64 wTmp=w;
@@ -957,11 +966,32 @@ Mipmap<I> PatchProcessor<I>::generate() const
 						y2+=m_patchMapMipmap.mipmap(k, l).height();
 
 					//choose your content here
-					srand(generationSeed%65535 + 65535*std::floor((x - patchOrigin[0])/m_patchMapMipmap.mipmap(k, l).width())
-						  + 1  *std::floor((y - patchOrigin[1])/m_patchMapMipmap.mipmap(k, l).height()));
-					pix += this->patchAt(p).contentAt(rand()%this->patchAt(p).nbContents()).mipmap(k, l).pixelAbsolute(x2, y2);
+					if(m_importanceSampler != nullptr)
+					{
+						unsigned int seed = generationSeed%65535 + 65535*std::floor((x - patchOrigin[0])/m_patchMapMipmap.mipmap(k, l).width())
+								+ 512 *std::floor((y - patchOrigin[1])/m_patchMapMipmap.mipmap(k, l).height()) + p;
+						srand(seed);
+						Eigen::Vector2f pf = m_importanceSampler->next();
+						pix_double += m_tile.pixelAbsolute((x+(int(pf[0]*m_tile.width()))) % m_tile.width(), (y+(int(pf[1]*m_tile.height()))) % m_tile.height());
+						++hit;
+					}
+					else
+					{
+						unsigned int seed = generationSeed%65535 + 65535*std::floor((x - patchOrigin[0])/m_patchMapMipmap.mipmap(k, l).width())
+								+ 1  *std::floor((y - patchOrigin[1])/m_patchMapMipmap.mipmap(k, l).height());
+						srand(seed);
+						pix += this->patchAt(p).contentAt(rand()%this->patchAt(p).nbContents()).mipmap(k, l).pixelAbsolute(x2, y2);
+					}
 				}
 				w*=2;
+			}
+			if(m_importanceSampler!=nullptr)
+			{
+				pix_double = pix_double * (1.0/hit);
+				for(unsigned int i=0; i<3; ++i)
+				{
+					pix[i] = pix_double[i];
+				}
 			}
 		});
 	};
@@ -1261,6 +1291,12 @@ void PatchProcessor<I>::debug_savePatchMap(const std::string &outputPath) const
 		w *= 2;
 	}
 	IO::save01_in_u8(colorPatchmap, outputPath);
+}
+
+template<typename I>
+void PatchProcessor<I>::setImportanceSampler(Stamping::SamplerImportance *importanceSampler)
+{
+	m_importanceSampler = importanceSampler;
 }
 
 }//namespace

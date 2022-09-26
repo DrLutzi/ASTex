@@ -103,7 +103,6 @@ private:
 	double					m_cyclicTransferRadius;
 	unsigned				m_cyclicTransferSamples;
 
-	bool							m_useImportanceSampling;
 	Stamping::SamplerImportance		*m_sampler;
 };
 
@@ -121,7 +120,8 @@ CSN_Texture<I>::CSN_Texture() :
 	m_useCyclicTransfer(false),
 	m_uvScale(1.0),
 	m_cyclicTransferRadius(0),
-	m_cyclicTransferSamples(1)
+	m_cyclicTransferSamples(1),
+	m_sampler(nullptr)
 {}
 
 template<typename I>
@@ -199,17 +199,9 @@ void CSN_Texture<I>::setCyclicTransferPolicy(unsigned radius, unsigned samples)
 }
 
 template<typename I>
-void CSN_Texture<I>::setUseSampler(bool b)
-{
-	m_useImportanceSampling = b;
-}
-
-template<typename I>
 void CSN_Texture<I>::setSampler(Stamping::SamplerImportance *sampler)
 {
 	m_sampler = sampler;
-	if(sampler != nullptr)
-		m_useImportanceSampling = true;
 }
 
 template<typename I>
@@ -1413,7 +1405,7 @@ typename CSN_Texture<I>::PcaPixelType CSN_Texture<I>::proceduralTilingAndBlendin
 
 	auto lmbd_hashFunction = [&](const Eigen::Vector2i &vec) -> Eigen::Vector2d
 	{
-		if(m_useImportanceSampling)
+		if(m_sampler != nullptr)
 			return importanceHash(vec.cast<double>());
 		if(m_useCycles)
 			return cyclicHash(vec.cast<double>());
@@ -1439,9 +1431,16 @@ typename CSN_Texture<I>::PcaPixelType CSN_Texture<I>::proceduralTilingAndBlendin
 	PcaPixelType color = I1 * w1 + I2 * w2 + I3 * w3;
 	for(unsigned i=0; i<3; ++i)
 	{
-		color[i] -= 0.5;
-		color[i] /= std::sqrt(w1*w1 + w2*w2 + w3*w3);
-		color[i] += 0.5;
+		if(m_useGaussianTransfer)
+		{
+			color[i] -= 0.5;
+			color[i] /= std::sqrt(w1*w1 + w2*w2 + w3*w3);
+			color[i] += 0.5;
+		}
+		else
+		{
+			color[i] /= std::sqrt(w1*w1 + w2*w2 + w3*w3);
+		}
 	}
 	return color;
 }

@@ -5,6 +5,7 @@
 #include "ASTex/Stamping/stamper.h"
 #include <map>
 #include "ASTex/histogram.h"
+#include "ASTex/rpn_utils.h"
 
 using namespace ASTex;
 
@@ -77,6 +78,10 @@ typedef struct
 	double uvScale;
 	double cyclicTransferRadius;
 	unsigned cyclicTransferSamples;
+	bool useImportanceSampling;
+	std::string importanceMapPath;
+	bool compareAutocovariance;
+	bool useSpatialMean;
 } ArgumentsType;
 
 /**
@@ -95,6 +100,8 @@ typedef struct
  * uvScale=1.0
  * cyclicTransferRadius=0.0
  * cyclicTransferSamples=1
+ * useImportanceSampling=0
+ * importanceMapPath=/home/nlutz/map.png
  * =======
  */
 ArgumentsType loadArguments(std::string filename)
@@ -173,6 +180,26 @@ ArgumentsType loadArguments(std::string filename)
 				{
 					ss << value;
 					ss >> arguments.cyclicTransferSamples;
+				}
+				else if(key == "useImportanceSampling")
+				{
+					ss << value;
+					ss >> arguments.useImportanceSampling;
+				}
+				else if(key == "importanceMapPath")
+				{
+					ss << value;
+					ss >> arguments.importanceMapPath;
+				}
+				else if(key == "compareAutocovariance")
+				{
+					ss << value;
+					ss >> arguments.compareAutocovariance;
+				}
+				else if(key == "useSpatialMean")
+				{
+					ss << value;
+					ss >> arguments.useSpatialMean;
 				}
 			}
 		}
@@ -326,7 +353,7 @@ int main(int argc, char **argv)
 		else
 		{
 			Stamping::SamplerUniform sampler;
-			sampler.setNbPoints(1000);
+			sampler.setNbPoints(32000);
 			Stamping::StamperTexton<PcaImageType> stamper(&sampler, &stamp);
 			stamper.setPeriodicity(true);
 			stamper.setSpot(false);
@@ -362,6 +389,36 @@ int main(int argc, char **argv)
 	csn.setUseYCbCr(arguments.useYCbCr);
 	csn.setUseCyclicTransfer(arguments.useCyclicTransfer);
 	csn.setUVScale(arguments.uvScale);
+	Stamping::SamplerImportance *si = nullptr;
+	ImageRGBd weightedMean;
+	if(arguments.useImportanceSampling && !arguments.useCycles)
+	{
+		ImageRGBd im_in_centered;
+		im_in_centered.initItk(im_in.width(), im_in.height(), true);
+		im_in_centered.copy_pixels(im_in);
+		ImageGrayd im_importanceMap;
+		IO::loadu8_in_01(im_importanceMap, arguments.importanceMapPath);
+		si = new Stamping::SamplerImportance(im_importanceMap, 0);
+		si->saveRealization("/home/nlutz/" + textureName + ".map", 2048);
+		//weightedMean = si->weightedMeanFullAccuracy(im_in, 256, 256);
+		if(arguments.useSpatialMean)
+		{
+			weightedMean.initItk(1, 1, true);
+			HistogramRGBBase<typename PcaImageType::DataType> histo(im_in_centered);
+			weightedMean.pixelAbsolute(0, 0) = histo.meanPixelType();
+		}
+		else
+			weightedMean = si->weightedMean(im_in_centered, 512, 512, 4096);
+		IO::save01_in_u8(weightedMean, "/home/nlutz/" + textureName + "_weightedMean.png");
+		im_in_centered.for_all_pixels([&] (ImageType::PixelType &pix, int x, int y)
+		{
+			double xd = double(x) * (double(weightedMean.width()) / im_in_centered.width());
+			double yd = double(y) * (double(weightedMean.height()) / im_in_centered.height());
+			pix -= bilinear_interpolation(weightedMean, xd, yd, true);
+		});
+		csn.setTexture(im_in_centered);
+		csn.setSampler(si);
+	}
 	if(arguments.useCyclicTransfer)
 		csn.setCyclicTransferPolicy(arguments.cyclicTransferRadius, arguments.cyclicTransferSamples);
 	if(arguments.proceduralBlendingMode == 1)
@@ -374,11 +431,61 @@ int main(int argc, char **argv)
 //		csn.estimateCycles(cyclePair.vectors[0], cyclePair.vectors[1], 0.02, true, 32);
 //	}
 	std::cout << textureName << std::endl;
-	std::cout << "Proposed cycle x: " << std::endl << cyclePair.vectors[0] << std::endl;
-	std::cout << "Proposed cycle y: " << std::endl << cyclePair.vectors[1] << std::endl;
-	std::cout << "Estimated cycle x: " << std::endl << csn.cycleX() << std::endl;
-	std::cout << "Estimated cycle y: " << std::endl << csn.cycleY() << std::endl;
+//	std::cout << "Proposed cycle x: " << std::endl << cyclePair.vectors[0] << std::endl;
+//	std::cout << "Proposed cycle y: " << std::endl << cyclePair.vectors[1] << std::endl;
+//	std::cout << "Estimated cycle x: " << std::endl << csn.cycleX() << std::endl;
+//	std::cout << "Estimated cycle y: " << std::endl << csn.cycleY() << std::endl;
 	ImageType output = csn.synthesize(arguments.outputWidth, arguments.outputHeight);
+	if(arguments.useImportanceSampling && !arguments.useCycles)
+	{
+		output.for_all_pixels([&] (ImageType::PixelType &pix, int x, int y)
+		{
+			double xd = double(x) * (double(weightedMean.width()) / im_in.width());
+			double yd = double(y) * (double(weightedMean.height()) / im_in.height());
+			pix += bilinear_interpolation(weightedMean, xd, yd, true);
+		});
+	}
+
+	{//Computing the variance of the principal component of the output
+		ImageType res;
+		PCA<double> pca(output);
+		MaskBool mb(output.width(), output.height());
+		mb |= [] (int, int) {return true;};
+		pca.computePCA(mb);
+		pca.project(res);
+		HistogramRGBBase<typename PcaImageType::DataType> histo(res);
+		PcaImageType::PixelType mean2 = histo.meanPixelType();
+		ImageGrayd L, a, b;
+		extract3Channels(res, L, a, b);
+		double variance;
+		L.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+		{
+			variance += (pix - mean2[0]) * (pix - mean2[0]);
+		});
+		variance /= L.width()*L.height();
+		std::cout << "variance of principal component (output): " << variance << std::endl;
+	}
+
+	{//Computing the variance of the principal component of the exemplar
+		ImageType res;
+		PCA<double> pca(im_in);
+		MaskBool mb(im_in.width(), im_in.height());
+		mb |= [] (int, int) {return true;};
+		pca.computePCA(mb);
+		pca.project(res);
+		HistogramRGBBase<typename PcaImageType::DataType> histo(res);
+		PcaImageType::PixelType mean2 = histo.meanPixelType();
+		ImageGrayd L, a, b;
+		extract3Channels(res, L, a, b);
+		double variance;
+		L.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+		{
+			variance += (pix - mean2[0]) * (pix - mean2[0]);
+		});
+		variance /= L.width()*L.height();
+		std::cout << "variance of principal component (exemplar): " << variance << std::endl;
+	}
+
 	output.for_all_pixels([&] (ImageType::PixelType &pix)
 	{
 		for(int i=0; i<3; ++i)
@@ -388,5 +495,71 @@ int main(int argc, char **argv)
 	});
 
 	IO::save01_in_u8(output, out_filename);
+
+	if(arguments.compareAutocovariance)
+	{
+		ImageGrayd autocorrelation_in, autocorrelation_out;
+		{
+			ImageType res;
+			PCA<double> pca(im_in);
+			MaskBool mb(im_in.width(), im_in.height());
+			mb |= [] (int, int) {return true;};
+			pca.computePCA(mb);
+			pca.project(res);
+			ImageGrayd L, a, b;
+			extract3Channels(res, L, a, b);
+
+			Fourier::truePeriodicStationaryAutocovariance(L, autocorrelation_in, true, false);
+			autocorrelation_in.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+			{
+					pix = pix > 1.0 ? 1.0 : (pix < 0.0 ? 0.0 : pix);
+			});
+			IO::save01_in_u8(autocorrelation_in, "/home/nlutz/" + textureName + "_autocorrelation_in_hpn.png");
+		}
+
+		{
+			ImageType res;
+			PCA<double> pca(output);
+			MaskBool mb(output.width(), output.height());
+			mb |= [] (int, int) {return true;};
+			pca.computePCA(mb);
+			pca.project(res);
+			ImageGrayd L, a, b;
+			extract3Channels(res, L, a, b);
+
+			Fourier::trueBoundedStationaryAutocovariance(L, autocorrelation_out, true, false, 512, 512);
+			autocorrelation_out.for_all_pixels([&] (ImageGrayd::PixelType &pix)
+			{
+					pix = pix > 1.0 ? 1.0 : (pix < 0.0 ? 0.0 : pix);
+			});
+			IO::save01_in_u8(autocorrelation_out, "/home/nlutz/" + textureName + "_autocorrelation_out_hpn.png");
+		}
+		double l2 = 0;
+		autocorrelation_in.for_all_pixels([&] (ImageGrayd::PixelType &pix, int x, int y)
+		{
+			ImageGrayd::PixelType &otherPix = autocorrelation_out.pixelAbsolute(x, y);
+			pix = std::sqrt((pix - otherPix) * (pix - otherPix));
+			l2 += pix;
+			pix /= 2;
+		});;
+		IO::save01_in_u8(autocorrelation_in, "/home/nlutz/" + textureName + "_autocorrelation_diff_hpn.png");
+		l2 /= autocorrelation_in.width()*autocorrelation_in.height();
+		std::cout << "total L2 diff: " << l2 << std::endl;
+	}
+
+	if(si)
+	{
+		si->setNbPoints(10000);
+		std::vector<Eigen::Vector2f> points = si->generate();
+		ImageGrayu8 pdf;
+		pdf.initItk(512, 512, true);
+		for(std::vector<Eigen::Vector2f>::const_iterator cit = points.begin(); cit!=points.end(); ++cit)
+		{
+			ImageGrayu8::PixelType &p = pdf.pixelAbsolute(int((*cit)[0]*(pdf.width()-1)), int((*cit)[1]*(pdf.height()-1)));
+			p = p == 250? 250 : p+50;
+		}
+		pdf.save(std::string("/home/nlutz/hpn_pdf.png"));
+			delete si;
+	}
 	return 0;
 }

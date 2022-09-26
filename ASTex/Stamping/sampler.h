@@ -507,12 +507,75 @@ public:
 
 	Eigen::Vector2f	next();
 
+	template<typename ImageType>
+	ImageType weightedMean(const ImageType& exemplar, int width, int height, int nbSamples);
+
+	template<typename ImageType>
+	ImageType weightedMeanFullAccuracy(const ImageType& exemplar, int width, int height);
+
+	void saveRealization(const std::string &outFilePath, unsigned int realizationSize);
+
 private:
 	ImageGrayd			m_importanceFunction;
 	unsigned int		m_nbPoints;
 	Distribution2D		m_distribution2D;
 	float *				m_functionFloatPointer;
 };
+
+template<typename ImageType>
+ImageType SamplerImportance::weightedMean(const ImageType& exemplar, int width, int height, int nbSamples)
+{
+	ImageType mean;
+	mean.initItk(width, height, true);
+	int nbSamplesOld = m_nbPoints;
+	m_nbPoints = nbSamples;
+	std::vector<Eigen::Vector2f> vectors = generate();
+	mean.for_all_pixels([&] (typename ImageType::PixelType &pix, int x, int y)
+	{
+		for(const Eigen::Vector2f &vec : vectors)
+		{
+			double xd=x, yd=y;
+			pix += bilinear_interpolation(exemplar, xd+(vec.x()*exemplar.width()), yd+(vec.y()*exemplar.height()), true);
+		}
+		pix = pix * (1.0/nbSamples);
+	});
+	m_nbPoints = nbSamplesOld;
+	return mean;
+}
+
+template<typename ImageType>
+ImageType SamplerImportance::weightedMeanFullAccuracy(const ImageType& exemplar, int width, int height)
+{
+	ImageType mean;
+	mean.initItk(width, height, true);
+	std::vector<Eigen::Vector2f> vectors = generate();
+	mean.for_all_pixels([&] (typename ImageType::PixelType &pix, int x, int y)
+	{
+		double totalWeight = 0.0;
+		exemplar.for_all_pixels([&] (const typename ImageType::PixelType &pixEx, int xEx, int yEx)
+		{
+			double xRelative = x * (double(exemplar.width())/mean.width());
+			double yRelative = y * (double(exemplar.height())/mean.height());
+			int xDiff = xEx - xRelative;
+			int yDiff = yEx - yRelative;
+			if(xDiff < 0)
+			{
+				xDiff += exemplar.width();
+			}
+			if(yDiff < 0)
+			{
+				yDiff += exemplar.height();
+			}
+			double xDiffRelative = double(xDiff) * (double(m_importanceFunction.width())/exemplar.width());;
+			double yDiffRelative = double(yDiff) * (double(m_importanceFunction.height())/exemplar.height());
+			double weight = bilinear_interpolation(m_importanceFunction, xDiffRelative, yDiffRelative, true);
+			pix += pixEx*weight;
+			totalWeight += weight;
+		});
+		pix = pix * (1.0/totalWeight);
+	});
+	return mean;
+}
 
 } //namespace Stamping
 
